@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #fafafa;
+  --bg-surface: #ffffff;
+  --fg-primary: #09090b;
+  --fg-muted: #52525b;
+  --border-subtle: #e4e4e7;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--fg-primary);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
