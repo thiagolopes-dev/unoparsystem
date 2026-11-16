@@ -28,7 +28,7 @@ npm run db:reset
 ```
 
 ### 3. Verificar as Chaves Locais (Opcional)
-O arquivo `.env.local` já está configurado com a URL local (`http://127.0.0.1:54321`) e a chave `anon` padrão do Supabase CLI. Caso sua versão do CLI gere uma `ANON_KEY` diferente no `supabase start`, copie o valor exibido no terminal para o `.env.local`.
+O arquivo `.env.local` já está configurado com a URL local (`http://127.0.0.1:55321`) e a chave `anon` padrão do Supabase CLI. Caso sua versão do CLI gere uma `ANON_KEY` diferente no `supabase start`, copie o valor exibido no terminal para o `.env.local`.
 
 ### 4. Iniciar a Aplicação Next.js
 ```bash
@@ -37,7 +37,7 @@ npm run dev
 
 Acesse:
 - **Aplicação Web:** `http://localhost:3000`
-- **Supabase Studio Local (Painel do Banco e Auth):** `http://127.0.0.1:54323`
+- **Supabase Studio Local (Painel do Banco e Auth):** `http://127.0.0.1:55323`
 
 ---
 

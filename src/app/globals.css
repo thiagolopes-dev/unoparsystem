@@ -14,3 +14,22 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
 }
+
+/* Remove qualquer outline/borda azul nativa do navegador em botões e elementos clicáveis */
+button,
+[type="button"],
+[type="reset"],
+[type="submit"] {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+[type="button"]:focus,
+[type="button"]:focus-visible,
+[type="submit"]:focus,
+[type="submit"]:focus-visible {
+  outline: none !important;
+  box-shadow: none;
+}
