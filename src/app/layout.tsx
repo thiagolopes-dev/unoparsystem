@@ -33,7 +33,7 @@ export default function RootLayout({
     >
       <body
         suppressHydrationWarning
-        className="min-h-screen bg-zinc-50 text-zinc-950 font-sans selection:bg-zinc-900 selection:text-white"
+        className="min-h-screen bg-[#060913] text-slate-100 font-sans selection:bg-cyan-400/30 selection:text-cyan-100"
       >
         {children}
       </body>

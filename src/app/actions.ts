@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -8,7 +9,8 @@ import {
   turmaSchema,
   professorSchema,
   aulaSchema,
-  detectScheduleConflict,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   canManageCatalog,
   canUpdateAula,
 } from "@/domain/gestao-aulas";
@@ -77,6 +79,141 @@ export async function logoutAction(): Promise<void> {
   await supabase.auth.signOut();
   revalidatePath("/", "layout");
   redirect("/login");
+}
+
+export async function requestPasswordResetAction(
+  formData: FormData
+): Promise<ActionResponse> {
+  const parsed = forgotPasswordSchema.safeParse({
+    email: formData.get("email"),
+  });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Informe um e-mail válido.",
+    };
+  }
+
+  const headerStore = await headers();
+  const host = headerStore.get("x-forwarded-host") || headerStore.get("host");
+  const proto = headerStore.get("x-forwarded-proto") || "http";
+  const origin =
+    headerStore.get("origin") ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (host ? `${proto}://${host}` : "http://127.0.0.1:3000");
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    parsed.data.email,
+    {
+      redirectTo: `${origin}/auth/callback?next=/redefinir-senha`,
+    }
+  );
+
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (
+      error.status === 429 ||
+      error.code === "over_email_send_rate_limit" ||
+      msg.includes("rate limit") ||
+      msg.includes("security purposes")
+    ) {
+      return {
+        ok: false,
+        error:
+          "Muitas solicitações em sequência. Aguarde alguns instantes antes de tentar novamente.",
+      };
+    }
+
+    return {
+      ok: false,
+      error:
+        "Não foi possível enviar o e-mail de recuperação no momento. Tente novamente em instantes.",
+    };
+  }
+
+  return {
+    ok: true,
+    message:
+      "Se o e-mail informado estiver cadastrado, você receberá um link para redefinir sua senha em instantes.",
+  };
+}
+
+export async function updatePasswordAction(
+  formData: FormData
+): Promise<ActionResponse> {
+  const parsed = resetPasswordSchema.safeParse({
+    password: formData.get("password"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Dados inválidos.",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      ok: false,
+      error:
+        "Sessão de recuperação inválida ou expirada. Solicite um novo link na tela de login.",
+    };
+  }
+
+  const { error } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+  });
+
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (
+      error.code === "same_password" ||
+      msg.includes("different from the old password") ||
+      msg.includes("same password")
+    ) {
+      return {
+        ok: false,
+        error: "A nova senha deve ser diferente da senha atual.",
+      };
+    }
+    if (
+      error.code === "weak_password" ||
+      msg.includes("weak") ||
+      msg.includes("at least")
+    ) {
+      return {
+        ok: false,
+        error:
+          "A senha informada não atende aos requisitos mínimos de segurança.",
+      };
+    }
+    if (error.status === 401 || error.status === 403) {
+      return {
+        ok: false,
+        error:
+          "Sessão de recuperação inválida ou expirada. Solicite um novo link na tela de login.",
+      };
+    }
+
+    return {
+      ok: false,
+      error: "Não foi possível atualizar a senha. Tente novamente.",
+    };
+  }
+
+  revalidatePath("/", "layout");
+  return {
+    ok: true,
+    message: "Senha atualizada com sucesso!",
+  };
 }
 
 // ============================================================================
@@ -429,8 +566,7 @@ export async function createAulaAction(
     turma_id: formData.get("turma_id"),
     professor_id: formData.get("professor_id"),
     data_aula: formData.get("data_aula"),
-    hora_inicio: formData.get("hora_inicio"),
-    hora_fim: formData.get("hora_fim"),
+    data_fim: formData.get("data_fim") || undefined,
     status: (formData.get("status") as AulaStatus) || "AGENDADA",
     sala: formData.get("sala") || null,
     conteudo_programatico: formData.get("conteudo_programatico") || null,
@@ -441,20 +577,6 @@ export async function createAulaAction(
     return {
       ok: false,
       error: parsed.error.issues[0]?.message ?? "Dados da aula inválidos.",
-    };
-  }
-
-  // Dupla checagem: camada de domínio + trigger PostgreSQL
-  const { data: sameDayAulas } = await supabase
-    .from("aulas")
-    .select("id, professor_id, turma_id, data_aula, hora_inicio, hora_fim, status")
-    .eq("data_aula", parsed.data.data_aula);
-
-  const conflict = detectScheduleConflict(parsed.data, sameDayAulas ?? []);
-  if (conflict.hasConflict) {
-    return {
-      ok: false,
-      error: conflict.message ?? "Conflito de horário detectado.",
     };
   }
 
@@ -543,8 +665,7 @@ export async function updateAulaAction(
     turma_id: formData.get("turma_id"),
     professor_id: formData.get("professor_id"),
     data_aula: formData.get("data_aula"),
-    hora_inicio: formData.get("hora_inicio"),
-    hora_fim: formData.get("hora_fim"),
+    data_fim: formData.get("data_fim") || undefined,
     status: (formData.get("status") as AulaStatus) || "AGENDADA",
     sala: formData.get("sala") || null,
     conteudo_programatico: formData.get("conteudo_programatico") || null,
@@ -555,23 +676,6 @@ export async function updateAulaAction(
     return {
       ok: false,
       error: parsed.error.issues[0]?.message ?? "Dados da aula inválidos.",
-    };
-  }
-
-  // Checagem de choque de horário excluindo o próprio ID da aula que está sendo alterada
-  const { data: sameDayAulas } = await supabase
-    .from("aulas")
-    .select("id, professor_id, turma_id, data_aula, hora_inicio, hora_fim, status")
-    .eq("data_aula", parsed.data.data_aula);
-
-  const conflict = detectScheduleConflict(
-    { id, ...parsed.data },
-    sameDayAulas ?? []
-  );
-  if (conflict.hasConflict) {
-    return {
-      ok: false,
-      error: conflict.message ?? "Conflito de horário detectado.",
     };
   }
 

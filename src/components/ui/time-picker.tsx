@@ -72,27 +72,27 @@ export function TimePicker({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={`h-10 w-full inline-flex items-center justify-between gap-1.5 rounded-xl border bg-white px-3 text-xs font-mono font-medium transition-all cursor-pointer select-none shadow-2xs ${
+        className={`h-10 w-full inline-flex items-center justify-between gap-1.5 rounded-xl border backdrop-blur-md px-3 text-xs font-mono font-medium transition-all cursor-pointer select-none ${
           open
-            ? "border-zinc-900 ring-2 ring-zinc-950/10 text-zinc-950"
-            : "border-zinc-200/90 text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50/60"
+            ? "border-cyan-400/60 bg-white/[0.08] ring-2 ring-cyan-400/15 text-white"
+            : "border-white/12 bg-white/[0.04] text-slate-100 hover:border-white/25 hover:bg-white/[0.07] focus-visible:border-cyan-400/50"
         }`}
       >
         <span className="flex items-center gap-1.5">
-          <Clock className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+          <Clock className="h-3.5 w-3.5 text-cyan-300 shrink-0" />
           <span>{value || "00:00"}</span>
         </span>
         <ChevronDown
-          className={`h-3.5 w-3.5 text-zinc-400 transition-transform duration-150 ${
-            open ? "rotate-180 text-zinc-900" : ""
+          className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
+            open ? "rotate-180 text-cyan-300" : ""
           }`}
         />
       </button>
 
       {open && (
-        <div className="absolute left-0 z-50 mt-1.5 w-[248px] rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xl shadow-zinc-950/10 ring-1 ring-black/5 select-none">
+        <div className="absolute left-0 z-50 mt-1.5 w-[248px] rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-3 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none">
           <div className="mb-2">
-            <span className="block font-mono text-[10px] uppercase tracking-wider text-zinc-400 mb-1.5">
+            <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">
               Horários Acadêmicos Rápidos
             </span>
             <div className="flex flex-wrap gap-1">
@@ -108,8 +108,8 @@ export function TimePicker({
                     }}
                     className={`px-2 py-1 rounded-md font-mono text-[11px] transition-colors cursor-pointer ${
                       active
-                        ? "bg-zinc-950 text-white font-semibold"
-                        : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200/80"
+                        ? "bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-semibold shadow-[0_0_14px_-2px_rgba(34,211,238,0.5)]"
+                        : "bg-white/[0.06] border border-white/10 text-slate-300 hover:bg-white/[0.12] hover:text-white"
                     }`}
                   >
                     {slot}
@@ -119,9 +119,9 @@ export function TimePicker({
             </div>
           </div>
 
-          <div className="pt-2.5 border-t border-zinc-100 grid grid-cols-2 gap-2">
+          <div className="pt-2.5 border-t border-white/10 grid grid-cols-2 gap-2">
             <div>
-              <span className="block font-mono text-[10px] uppercase tracking-wider text-zinc-400 mb-1">
+              <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400 mb-1">
                 Hora
               </span>
               <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
@@ -130,10 +130,10 @@ export function TimePicker({
                     key={h}
                     type="button"
                     onClick={() => onChange(`${h}:${currentMinute}`)}
-                    className={`w-full text-left px-2 py-1 rounded-md font-mono text-xs cursor-pointer ${
+                    className={`w-full text-left px-2 py-1 rounded-md font-mono text-xs transition-colors cursor-pointer ${
                       h === currentHour
-                        ? "bg-zinc-950 text-white font-semibold"
-                        : "text-zinc-700 hover:bg-zinc-100"
+                        ? "bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-semibold shadow-[0_0_12px_-2px_rgba(34,211,238,0.45)]"
+                        : "text-slate-300 hover:bg-white/[0.08] hover:text-white"
                     }`}
                   >
                     {h}h
@@ -143,7 +143,7 @@ export function TimePicker({
             </div>
 
             <div>
-              <span className="block font-mono text-[10px] uppercase tracking-wider text-zinc-400 mb-1">
+              <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400 mb-1">
                 Minuto
               </span>
               <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
@@ -155,10 +155,10 @@ export function TimePicker({
                       onChange(`${currentHour}:${m}`);
                       setOpen(false);
                     }}
-                    className={`w-full text-left px-2 py-1 rounded-md font-mono text-xs cursor-pointer ${
+                    className={`w-full text-left px-2 py-1 rounded-md font-mono text-xs transition-colors cursor-pointer ${
                       m === currentMinute
-                        ? "bg-zinc-950 text-white font-semibold"
-                        : "text-zinc-700 hover:bg-zinc-100"
+                        ? "bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-semibold shadow-[0_0_12px_-2px_rgba(34,211,238,0.45)]"
+                        : "text-slate-300 hover:bg-white/[0.08] hover:text-white"
                     }`}
                   >
                     :{m}

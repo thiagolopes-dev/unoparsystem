@@ -145,6 +145,7 @@ export type Database = {
           turma_id: string;
           professor_id: string;
           data_aula: string;
+          data_fim: string;
           hora_inicio: string;
           hora_fim: string;
           status: AulaStatus;
@@ -160,8 +161,9 @@ export type Database = {
           turma_id: string;
           professor_id: string;
           data_aula: string;
-          hora_inicio: string;
-          hora_fim: string;
+          data_fim?: string;
+          hora_inicio?: string;
+          hora_fim?: string;
           status?: AulaStatus;
           sala?: string | null;
           conteudo_programatico?: string | null;
@@ -174,6 +176,7 @@ export type Database = {
           turma_id?: string;
           professor_id?: string;
           data_aula?: string;
+          data_fim?: string;
           hora_inicio?: string;
           hora_fim?: string;
           status?: AulaStatus;

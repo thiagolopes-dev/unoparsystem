@@ -4,9 +4,12 @@ import {
   turmaSchema,
   professorSchema,
   aulaSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   detectScheduleConflict,
   canManageCatalog,
   canUpdateAula,
+  formatPhoneBr,
   type ExistingAulaSlot,
 } from "../gestao-aulas";
 
@@ -59,7 +62,84 @@ describe("TDD - Domínio de Gestão de Aulas", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.email).toBe("ricardo@unopar.br");
+        expect(result.data.telefone).toBe("(43) 99911-2233");
       }
+    });
+
+    it("deve formatar telefone com máscara brasileira e rejeitar telefones inválidos", () => {
+      expect(formatPhoneBr("43999112233")).toBe("(43) 99911-2233");
+      expect(formatPhoneBr("4333445566")).toBe("(43) 3344-5566");
+      expect(formatPhoneBr("4399")).toBe("(43) 99");
+      expect(formatPhoneBr("439991122334455")).toBe("(43) 99911-2233");
+      expect(formatPhoneBr("")).toBe("");
+
+      const validLandline = professorSchema.safeParse({
+        nome: "Prof. Ana Paula",
+        email: "ana@unopar.br",
+        telefone: "4333445566",
+        titulacao: "Mestre",
+      });
+      expect(validLandline.success).toBe(true);
+      if (validLandline.success) {
+        expect(validLandline.data.telefone).toBe("(43) 3344-5566");
+      }
+
+      const emptyPhone = professorSchema.safeParse({
+        nome: "Prof. Ana Paula",
+        email: "ana@unopar.br",
+        telefone: null,
+        titulacao: "Mestre",
+      });
+      expect(emptyPhone.success).toBe(true);
+      if (emptyPhone.success) {
+        expect(emptyPhone.data.telefone).toBeNull();
+      }
+
+      const invalidShortPhone = professorSchema.safeParse({
+        nome: "Prof. Ana Paula",
+        email: "ana@unopar.br",
+        telefone: "342343",
+        titulacao: "Mestre",
+      });
+      expect(invalidShortPhone.success).toBe(false);
+
+      const invalidLongPhone = professorSchema.safeParse({
+        nome: "Prof. Ana Paula",
+        email: "ana@unopar.br",
+        telefone: "45345345345345345345",
+        titulacao: "Mestre",
+      });
+      expect(invalidLongPhone.success).toBe(false);
+    });
+
+    it("deve validar aula com data inicial e data final sem informar horários", () => {
+      const result = aulaSchema.safeParse({
+        disciplina_id: "b1111111-1111-1111-1111-111111111111",
+        turma_id: "c1111111-1111-1111-1111-111111111111",
+        professor_id: "a1111111-1111-1111-1111-111111111111",
+        data_aula: "2026-03-02",
+        data_fim: "2026-03-06",
+        status: "AGENDADA",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.data_aula).toBe("2026-03-02");
+        expect(result.data.data_fim).toBe("2026-03-06");
+        expect(result.data.hora_inicio).toBe("08:00");
+        expect(result.data.hora_fim).toBe("22:00");
+      }
+    });
+
+    it("deve rejeitar aula quando data_fim for anterior a data_aula", () => {
+      const result = aulaSchema.safeParse({
+        disciplina_id: "b1111111-1111-1111-1111-111111111111",
+        turma_id: "c1111111-1111-1111-1111-111111111111",
+        professor_id: "a1111111-1111-1111-1111-111111111111",
+        data_aula: "2026-03-10",
+        data_fim: "2026-03-05",
+        status: "AGENDADA",
+      });
+      expect(result.success).toBe(false);
     });
 
     it("deve rejeitar aula quando hora_fim for menor ou igual a hora_inicio", () => {
@@ -212,6 +292,49 @@ describe("TDD - Domínio de Gestão de Aulas", () => {
           aulaProfessorUserId: "prof-user-1",
         })
       ).toBe(false);
+    });
+  });
+
+  describe("4. Recuperação e Redefinição de Senha", () => {
+    it("deve normalizar o e-mail para lowercase e remover espaços em forgotPasswordSchema", () => {
+      const result = forgotPasswordSchema.safeParse({
+        email: "  Professor.Teste@Unopar.BR  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.email).toBe("professor.teste@unopar.br");
+      }
+    });
+
+    it("deve rejeitar e-mail inválido ou vazio em forgotPasswordSchema", () => {
+      expect(forgotPasswordSchema.safeParse({ email: "" }).success).toBe(false);
+      expect(
+        forgotPasswordSchema.safeParse({ email: "email-invalido" }).success
+      ).toBe(false);
+    });
+
+    it("deve aprovar resetPasswordSchema quando senha e confirmação coincidirem com >= 6 caracteres", () => {
+      const result = resetPasswordSchema.safeParse({
+        password: "NovaSenha123!",
+        confirmPassword: "NovaSenha123!",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("deve rejeitar resetPasswordSchema quando a senha tiver menos de 6 caracteres", () => {
+      const result = resetPasswordSchema.safeParse({
+        password: "12345",
+        confirmPassword: "12345",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("deve rejeitar resetPasswordSchema quando as senhas não coincidirem", () => {
+      const result = resetPasswordSchema.safeParse({
+        password: "NovaSenha123!",
+        confirmPassword: "OutraSenha123!",
+      });
+      expect(result.success).toBe(false);
     });
   });
 });

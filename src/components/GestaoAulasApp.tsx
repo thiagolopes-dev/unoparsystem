@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useEffect, useMemo, useTransition } from "react";
 import {
   createAulaAction,
   updateAulaAction,
@@ -18,9 +18,9 @@ import {
   logoutAction,
 } from "@/app/actions";
 import {
-  detectScheduleConflict,
   canManageCatalog,
   canUpdateAula,
+  formatPhoneBr,
   STATUS_LABELS,
   TURNO_LABELS,
 } from "@/domain/gestao-aulas";
@@ -32,12 +32,11 @@ import type {
 } from "@/types/database.types";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { DatePicker, formatIsoDatePtBr } from "@/components/ui/date-picker";
-import { TimePicker } from "@/components/ui/time-picker";
 import { Dialog } from "@/components/ui/dialog";
 import {
   BookOpen,
+  BookOpenCheck,
   Calendar,
-  Clock,
   GraduationCap,
   Layers,
   LogOut,
@@ -51,7 +50,16 @@ import {
   MapPin,
   Search,
   RotateCcw,
+  X,
 } from "lucide-react";
+
+function formatAulaPeriod(dataInicio: string, dataFim?: string | null): string {
+  const inicioLabel = formatIsoDatePtBr(dataInicio);
+  if (!dataFim || dataFim === dataInicio) {
+    return inicioLabel;
+  }
+  return `${inicioLabel} até ${formatIsoDatePtBr(dataFim)}`;
+}
 
 type DisciplinaRow = Database["public"]["Tables"]["disciplinas"]["Row"];
 type TurmaRow = Database["public"]["Tables"]["turmas"]["Row"];
@@ -87,32 +95,32 @@ const STATUS_BADGE_STYLES: Record<
   { pill: string; dot: string }
 > = {
   AGENDADA: {
-    pill: "bg-zinc-100/90 text-zinc-800 border-zinc-200/90",
-    dot: "bg-zinc-500",
+    pill: "bg-sky-400/10 text-sky-200 border-sky-400/25",
+    dot: "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.75)]",
   },
   EM_ANDAMENTO: {
-    pill: "bg-amber-50 text-amber-900 border-amber-200/90",
-    dot: "bg-amber-500",
+    pill: "bg-amber-400/12 text-amber-200 border-amber-400/30",
+    dot: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.75)]",
   },
   CONCLUIDA: {
-    pill: "bg-emerald-50 text-emerald-900 border-emerald-200/90",
-    dot: "bg-emerald-500",
+    pill: "bg-emerald-400/12 text-emerald-200 border-emerald-400/30",
+    dot: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]",
   },
   CANCELADA: {
-    pill: "bg-red-50 text-red-800 border-red-200/90 line-through",
-    dot: "bg-red-500",
+    pill: "bg-rose-400/12 text-rose-200 border-rose-400/30 line-through",
+    dot: "bg-rose-400",
   },
 };
 
 const STATUS_OPTIONS: SelectOption[] = [
-  { value: "AGENDADA", label: "Agendada", dotColor: "bg-zinc-400" },
-  { value: "EM_ANDAMENTO", label: "Em Andamento", dotColor: "bg-amber-500" },
-  { value: "CONCLUIDA", label: "Concluída", dotColor: "bg-emerald-500" },
-  { value: "CANCELADA", label: "Cancelada", dotColor: "bg-red-500" },
+  { value: "AGENDADA", label: "Agendada", dotColor: "bg-sky-400" },
+  { value: "EM_ANDAMENTO", label: "Em Andamento", dotColor: "bg-amber-400" },
+  { value: "CONCLUIDA", label: "Concluída", dotColor: "bg-emerald-400" },
+  { value: "CANCELADA", label: "Cancelada", dotColor: "bg-rose-400" },
 ];
 
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
-  { value: "TODOS", label: "Todos os Status", dotColor: "bg-zinc-900" },
+  { value: "TODOS", label: "Todos os Status", dotColor: "bg-cyan-400" },
   ...STATUS_OPTIONS,
 ];
 
@@ -129,6 +137,94 @@ const TITULACAO_OPTIONS: SelectOption[] = [
   { value: "Pós-Doutor", label: "Pós-Doutor(a)", badge: "PÓS-DOC" },
 ];
 
+const GLASS_LABEL_CLASS = "block text-xs font-medium text-slate-300 mb-1.5";
+const GLASS_INPUT_CLASS =
+  "login-glass-input h-10 w-full rounded-xl border border-white/15 bg-white/[0.05] px-3.5 text-xs text-slate-100 placeholder:text-slate-400/70 transition-all hover:border-white/25 focus:bg-white/[0.09] focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/15 focus:outline-none";
+const GLASS_TEXTAREA_CLASS =
+  "w-full rounded-xl border border-white/15 bg-white/[0.05] px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-400/70 transition-all hover:border-white/25 focus:bg-white/[0.09] focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/15 focus:outline-none";
+const GLASS_CANCEL_BTN_CLASS =
+  "h-9 px-4 rounded-xl border border-white/15 bg-white/[0.05] text-xs font-medium text-slate-300 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer";
+const GLASS_PRIMARY_BTN_CLASS =
+  "h-9 inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-4 text-xs font-semibold text-slate-950 shadow-[0_4px_20px_-4px_rgba(34,211,238,0.45)] hover:brightness-105 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer";
+
+type DeleteEntityKind = "aula" | "disciplina" | "turma" | "professor";
+
+const DELETE_DIALOG_META: Record<
+  DeleteEntityKind,
+  { title: string; description: string }
+> = {
+  aula: {
+    title: "Excluir Aula da Grade",
+    description:
+      "Esta ação removerá permanentemente o agendamento selecionado da grade.",
+  },
+  disciplina: {
+    title: "Excluir Disciplina",
+    description:
+      "Esta ação removerá permanentemente a disciplina do catálogo curricular.",
+  },
+  turma: {
+    title: "Excluir Turma",
+    description:
+      "Esta ação removerá permanentemente a turma cadastrada do sistema.",
+  },
+  professor: {
+    title: "Excluir Professor(a)",
+    description:
+      "Esta ação removerá permanentemente o registro docente do sistema.",
+  },
+};
+
+function DashboardBackdrop() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-0 z-0 overflow-hidden select-none"
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,#0f1f40_0%,#060913_58%,#03050b_100%)]" />
+      <div className="login-aurora absolute -top-40 -left-24 h-[460px] w-[460px] rounded-full bg-cyan-500/15 blur-[135px]" />
+      <div className="login-aurora-delayed absolute -bottom-44 -right-24 h-[500px] w-[500px] rounded-full bg-emerald-500/12 blur-[145px]" />
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 h-[380px] w-[560px] rounded-full bg-indigo-500/12 blur-[150px]" />
+
+      <svg
+        className="absolute inset-0 h-full w-full"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern
+            id="dashboard-grid"
+            width="48"
+            height="48"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 48 0 L 0 0 0 48"
+              fill="none"
+              stroke="rgba(148, 163, 184, 0.06)"
+              strokeWidth="1"
+            />
+          </pattern>
+          <radialGradient id="dashboard-grid-fade" cx="50%" cy="25%" r="65%">
+            <stop offset="0%" stopColor="white" stopOpacity="0.9" />
+            <stop offset="65%" stopColor="white" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="white" stopOpacity="0" />
+          </radialGradient>
+          <mask id="dashboard-grid-mask">
+            <rect width="100%" height="100%" fill="url(#dashboard-grid-fade)" />
+          </mask>
+        </defs>
+
+        <rect
+          width="100%"
+          height="100%"
+          fill="url(#dashboard-grid)"
+          mask="url(#dashboard-grid-mask)"
+        />
+      </svg>
+    </div>
+  );
+}
+
 export function GestaoAulasApp({
   currentUser,
   disciplinas,
@@ -138,17 +234,38 @@ export function GestaoAulasApp({
 }: GestaoAulasAppProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("aulas");
   const [feedback, setFeedback] = useState<{
+    id: number;
     type: "success" | "error";
+    title: string;
     text: string;
   } | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => {
+      setFeedback((current) =>
+        current?.id === feedback.id ? null : current
+      );
+    }, 4200);
+    return () => window.clearTimeout(timer);
+  }, [feedback?.id]);
+
   // Controle de Modais de Criação e Edição (shadcn Dialog pattern)
   const [openModal, setOpenModal] = useState<ActiveTab | null>(null);
-  const [editingDisciplina, setEditingDisciplina] = useState<DisciplinaRow | null>(null);
+  const [editingDisciplina, setEditingDisciplina] =
+    useState<DisciplinaRow | null>(null);
   const [editingTurma, setEditingTurma] = useState<TurmaRow | null>(null);
-  const [editingProfessor, setEditingProfessor] = useState<ProfessorRow | null>(null);
+  const [editingProfessor, setEditingProfessor] =
+    useState<ProfessorRow | null>(null);
   const [editingAula, setEditingAula] = useState<AulaEnriched | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: DeleteEntityKind;
+    id: string;
+    title: string;
+    subtitle?: string;
+    badge?: string;
+  } | null>(null);
 
   // Filtros da Grade de Aulas
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -160,19 +277,19 @@ export function GestaoAulasApp({
     currentUser.role === "PROFESSOR"
   );
 
-  // Estado dos selects em modais de Turma e Professor
+  // Estado dos selects e máscara em modais de Turma e Professor
   const [draftTurno, setDraftTurno] = useState<string>("NOTURNO");
   const [draftTitulacao, setDraftTitulacao] = useState<string>("Mestre");
+  const [draftTelefone, setDraftTelefone] = useState<string>("");
 
-  // Estado do formulário de Nova Aula para pré-validação em tempo real de choque de horário
+  // Estado do formulário de Nova Aula para pré-validação de período
   const todayIso = new Date().toISOString().slice(0, 10);
   const [draftAula, setDraftAula] = useState({
     disciplina_id: disciplinas[0]?.id ?? "",
     turma_id: turmas[0]?.id ?? "",
     professor_id: professores[0]?.id ?? "",
     data_aula: todayIso,
-    hora_inicio: "19:00",
-    hora_fim: "20:40",
+    data_fim: todayIso,
     status: "AGENDADA" as AulaStatus,
     sala: "",
     conteudo_programatico: "",
@@ -255,8 +372,7 @@ export function GestaoAulasApp({
         turma_id: turmas[0]?.id ?? "",
         professor_id: professores[0]?.id ?? "",
         data_aula: todayIso,
-        hora_inicio: "19:00",
-        hora_fim: "20:40",
+        data_fim: todayIso,
         status: "AGENDADA" as AulaStatus,
         sala: "",
         conteudo_programatico: "",
@@ -266,6 +382,7 @@ export function GestaoAulasApp({
       setDraftTurno("NOTURNO");
     } else if (tab === "professores") {
       setDraftTitulacao("Mestre");
+      setDraftTelefone("");
     }
     setOpenModal(tab);
   }
@@ -284,6 +401,7 @@ export function GestaoAulasApp({
   function handleEditProfessor(p: ProfessorRow) {
     setEditingProfessor(p);
     setDraftTitulacao(p.titulacao);
+    setDraftTelefone(formatPhoneBr(p.telefone ?? ""));
     setOpenModal("professores");
   }
 
@@ -294,8 +412,7 @@ export function GestaoAulasApp({
       turma_id: a.turma_id,
       professor_id: a.professor_id,
       data_aula: a.data_aula,
-      hora_inicio: a.hora_inicio.slice(0, 5),
-      hora_fim: a.hora_fim.slice(0, 5),
+      data_fim: a.data_fim ?? a.data_aula,
       status: a.status,
       sala: a.sala ?? "",
       conteudo_programatico: a.conteudo_programatico ?? "",
@@ -310,37 +427,30 @@ export function GestaoAulasApp({
     setEditingTurma(null);
     setEditingProfessor(null);
     setEditingAula(null);
+    setDraftTelefone("");
   }
 
-  // Checagem instantânea de conflito de horário no cliente antes mesmo de enviar
+  // Validação instantânea do período de datas no cliente
   const liveConflict = useMemo(() => {
-    if (
-      !draftAula.professor_id ||
-      !draftAula.turma_id ||
-      !draftAula.data_aula ||
-      !draftAula.hora_inicio ||
-      !draftAula.hora_fim
-    ) {
+    if (!draftAula.data_aula || !draftAula.data_fim) {
       return null;
     }
-    if (draftAula.hora_fim <= draftAula.hora_inicio) {
+    if (draftAula.data_fim < draftAula.data_aula) {
       return {
         hasConflict: true,
-        message: "O horário final deve ser maior que o horário inicial.",
+        message: "A data final deve ser igual ou posterior à data inicial.",
       };
     }
-    const candidate = {
-      ...(editingAula ? { id: editingAula.id } : {}),
-      ...draftAula,
-    };
-    const result = detectScheduleConflict(candidate, aulas);
-    return result.hasConflict ? result : null;
-  }, [draftAula, aulas, editingAula]);
+    return null;
+  }, [draftAula.data_aula, draftAula.data_fim]);
 
   const filteredAulas = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return aulas.filter((aula) => {
-      if (filterDate && aula.data_aula !== filterDate) return false;
+      if (filterDate) {
+        const endDate = aula.data_fim || aula.data_aula;
+        if (filterDate < aula.data_aula || filterDate > endDate) return false;
+      }
       if (filterStatus !== "TODOS" && aula.status !== filterStatus)
         return false;
       if (filterTurmaId !== "TODAS" && aula.turma_id !== filterTurmaId)
@@ -410,24 +520,54 @@ export function GestaoAulasApp({
 
   function runAction(
     fn: () => Promise<{ ok: boolean; error?: string; message?: string }>,
-    onSuccess?: () => void
+    onSuccess?: () => void,
+    successTitle = "Operação concluída"
   ) {
-    setFeedback(null);
     startTransition(async () => {
       const res = await fn();
       if (!res.ok) {
         setFeedback({
+          id: Date.now(),
           type: "error",
+          title: "Não foi possível concluir",
           text: res.error ?? "Não foi possível concluir a operação.",
         });
       } else {
         setFeedback({
+          id: Date.now(),
           type: "success",
+          title: successTitle,
           text: res.message ?? "Operação realizada com sucesso.",
         });
         onSuccess?.();
       }
     });
+  }
+
+  function handleConfirmDelete() {
+    if (!pendingDelete) return;
+    const { kind, id } = pendingDelete;
+    const deleteActionByKind: Record<
+      DeleteEntityKind,
+      (targetId: string) => Promise<{ ok: boolean; error?: string; message?: string }>
+    > = {
+      aula: deleteAulaAction,
+      disciplina: deleteDisciplinaAction,
+      turma: deleteTurmaAction,
+      professor: deleteProfessorAction,
+    };
+
+    runAction(
+      async () => {
+        try {
+          return await deleteActionByKind[kind](id);
+        } finally {
+          setPendingDelete(null);
+        }
+      },
+      undefined,
+      "Exclusão concluída"
+    );
   }
 
   const ctaButtonLabel: Record<ActiveTab, string> = {
@@ -438,24 +578,33 @@ export function GestaoAulasApp({
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA] text-zinc-950 antialiased">
-      {/* Top Bar Minimalista */}
-      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-zinc-200/80">
+    <div className="relative min-h-screen flex flex-col bg-[#060913] text-slate-100 antialiased">
+      <DashboardBackdrop />
+
+      {/* Top Bar Orbital Glass */}
+      <header className="sticky top-0 z-30 bg-[#070b17]/75 backdrop-blur-2xl border-b border-white/10">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent"
+        />
         <div className="max-w-7xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-zinc-950 text-white flex items-center justify-center font-mono text-xs font-bold shadow-xs">
-              UN
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-400/20 via-sky-500/10 to-emerald-400/20 border border-cyan-300/30 text-cyan-300 flex items-center justify-center shadow-[0_0_20px_-4px_rgba(34,211,238,0.45)] shrink-0">
+              <BookOpenCheck className="h-4.5 w-4.5 drop-shadow-[0_0_6px_rgba(103,232,249,0.5)]" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm tracking-tight text-zinc-950">
-                  UnoparSystem
+                <span className="font-semibold text-sm tracking-tight text-white">
+                  UNOPAR
+                  <span className="bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300 bg-clip-text text-transparent font-normal">
+                    SYSTEM
+                  </span>
                 </span>
-                <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border border-zinc-200/80 bg-zinc-100/70 text-zinc-600">
+                <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border border-white/10 bg-white/[0.06] text-cyan-300">
                   Gestão Acadêmica
                 </span>
               </div>
-              <p className="text-xs text-zinc-500 hidden sm:block">
+              <p className="text-xs text-slate-400 hidden sm:block">
                 Controle unificado de disciplinas, turmas, corpo docente e diário de aulas
               </p>
             </div>
@@ -464,20 +613,20 @@ export function GestaoAulasApp({
           <div className="flex items-center gap-3">
             <div className="text-right hidden md:block">
               <div className="flex items-center justify-end gap-1.5">
-                <span className="text-xs font-medium text-zinc-900">
+                <span className="text-xs font-medium text-slate-100">
                   {currentUser.nome}
                 </span>
                 <span
-                  className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded ${
+                  className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded border ${
                     isAdmin
-                      ? "bg-zinc-950 text-white"
-                      : "bg-zinc-200 text-zinc-800"
+                      ? "bg-cyan-400/15 text-cyan-200 border-cyan-400/30"
+                      : "bg-white/[0.08] text-slate-300 border-white/10"
                   }`}
                 >
                   {currentUser.role}
                 </span>
               </div>
-              <span className="text-[11px] font-mono text-zinc-500 block">
+              <span className="text-[11px] font-mono text-slate-400 block">
                 {currentUser.email}
               </span>
             </div>
@@ -486,9 +635,9 @@ export function GestaoAulasApp({
               <button
                 type="submit"
                 title="Sair do sistema"
-                className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/90 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 transition-colors cursor-pointer shadow-2xs"
+                className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] px-3 text-xs font-medium text-slate-200 hover:bg-white/[0.1] hover:border-white/25 hover:text-white focus-visible:border-cyan-400/60 transition-colors cursor-pointer"
               >
-                <LogOut className="h-3.5 w-3.5" />
+                <LogOut className="h-3.5 w-3.5 text-slate-400" />
                 <span>Sair</span>
               </button>
             </form>
@@ -496,7 +645,7 @@ export function GestaoAulasApp({
         </div>
 
         {/* Navigation Tabs + Primary Action Button */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between gap-4 border-t border-zinc-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between gap-4 border-t border-white/[0.07]">
           <div className="flex items-center gap-1 overflow-x-auto">
             {[
               {
@@ -536,17 +685,21 @@ export function GestaoAulasApp({
                   }}
                   className={`flex items-center gap-2 px-3.5 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                     active
-                      ? "border-zinc-950 text-zinc-950"
-                      : "border-transparent text-zinc-500 hover:text-zinc-800"
+                      ? "border-cyan-400 text-white"
+                      : "border-transparent text-slate-400 hover:text-slate-200"
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon
+                    className={`h-3.5 w-3.5 ${
+                      active ? "text-cyan-300" : "text-slate-400"
+                    }`}
+                  />
                   <span>{tab.label}</span>
                   <span
-                    className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md ${
+                    className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md border ${
                       active
-                        ? "bg-zinc-950 text-white"
-                        : "bg-zinc-100 text-zinc-600"
+                        ? "bg-cyan-400/20 text-cyan-200 border-cyan-400/30"
+                        : "bg-white/[0.06] text-slate-400 border-transparent"
                     }`}
                   >
                     {tab.count}
@@ -560,7 +713,7 @@ export function GestaoAulasApp({
             <button
               type="button"
               onClick={() => handleOpenCreate(activeTab)}
-              className="my-1.5 h-8 inline-flex items-center gap-1.5 rounded-lg bg-zinc-950 px-3 text-xs font-medium text-white hover:bg-zinc-800 transition-colors cursor-pointer shrink-0 shadow-xs outline-none focus:outline-none focus-visible:outline-none"
+              className="my-1.5 h-8 inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-3 text-xs font-semibold text-slate-950 shadow-[0_4px_20px_-4px_rgba(34,211,238,0.45)] hover:brightness-105 transition-all cursor-pointer shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>{ctaButtonLabel[activeTab]}</span>
@@ -570,7 +723,7 @@ export function GestaoAulasApp({
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 flex-1 space-y-5">
+      <main className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 flex-1 space-y-5">
         {/* Compact KPI Strip */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <button
@@ -579,19 +732,19 @@ export function GestaoAulasApp({
               setActiveTab("aulas");
               setFilterStatus("TODOS");
             }}
-            className={`text-left bg-white border rounded-xl p-4 transition-all cursor-pointer shadow-2xs ${
+            className={`text-left backdrop-blur-xl border rounded-xl p-4 transition-all cursor-pointer ${
               filterStatus === "TODOS" && activeTab === "aulas"
-                ? "border-zinc-900 ring-1 ring-zinc-950/5"
-                : "border-zinc-200/80 hover:border-zinc-300"
+                ? "border-cyan-400/60 bg-cyan-400/[0.06] shadow-[0_0_25px_-8px_rgba(34,211,238,0.3)]"
+                : "border-white/10 bg-[#0b1224]/65 hover:border-white/20 hover:bg-[#0e172e]/75"
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-zinc-500">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-slate-400">
                 Total na Grade
               </span>
-              <span className="h-2 w-2 rounded-full bg-zinc-900" />
+              <span className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
             </div>
-            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-zinc-950">
+            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-white">
               {metrics.total}
             </p>
           </button>
@@ -602,19 +755,19 @@ export function GestaoAulasApp({
               setActiveTab("aulas");
               setFilterStatus("AGENDADA");
             }}
-            className={`text-left bg-white border rounded-xl p-4 transition-all cursor-pointer shadow-2xs ${
+            className={`text-left backdrop-blur-xl border rounded-xl p-4 transition-all cursor-pointer ${
               filterStatus === "AGENDADA" && activeTab === "aulas"
-                ? "border-zinc-900 ring-1 ring-zinc-950/5"
-                : "border-zinc-200/80 hover:border-zinc-300"
+                ? "border-sky-400/60 bg-sky-400/[0.06] shadow-[0_0_25px_-8px_rgba(56,189,248,0.3)]"
+                : "border-white/10 bg-[#0b1224]/65 hover:border-white/20 hover:bg-[#0e172e]/75"
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-zinc-500">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-sky-300/90">
                 Agendadas
               </span>
-              <span className="h-2 w-2 rounded-full bg-zinc-400" />
+              <span className="h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
             </div>
-            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-zinc-900">
+            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-sky-200">
               {metrics.agendadas}
             </p>
           </button>
@@ -625,19 +778,19 @@ export function GestaoAulasApp({
               setActiveTab("aulas");
               setFilterStatus("EM_ANDAMENTO");
             }}
-            className={`text-left bg-white border rounded-xl p-4 transition-all cursor-pointer shadow-2xs ${
+            className={`text-left backdrop-blur-xl border rounded-xl p-4 transition-all cursor-pointer ${
               filterStatus === "EM_ANDAMENTO" && activeTab === "aulas"
-                ? "border-amber-500 ring-1 ring-amber-500/20"
-                : "border-zinc-200/80 hover:border-zinc-300"
+                ? "border-amber-400/60 bg-amber-400/[0.06] shadow-[0_0_25px_-8px_rgba(251,191,36,0.3)]"
+                : "border-white/10 bg-[#0b1224]/65 hover:border-white/20 hover:bg-[#0e172e]/75"
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-amber-700">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-amber-300/90">
                 Em Andamento
               </span>
-              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
             </div>
-            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-amber-700">
+            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-amber-200">
               {metrics.emAndamento}
             </p>
           </button>
@@ -648,19 +801,19 @@ export function GestaoAulasApp({
               setActiveTab("aulas");
               setFilterStatus("CONCLUIDA");
             }}
-            className={`text-left bg-white border rounded-xl p-4 transition-all cursor-pointer shadow-2xs ${
+            className={`text-left backdrop-blur-xl border rounded-xl p-4 transition-all cursor-pointer ${
               filterStatus === "CONCLUIDA" && activeTab === "aulas"
-                ? "border-emerald-600 ring-1 ring-emerald-600/20"
-                : "border-zinc-200/80 hover:border-zinc-300"
+                ? "border-emerald-400/60 bg-emerald-400/[0.06] shadow-[0_0_25px_-8px_rgba(52,211,153,0.3)]"
+                : "border-white/10 bg-[#0b1224]/65 hover:border-white/20 hover:bg-[#0e172e]/75"
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-emerald-700">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-emerald-300/90">
                 Concluídas
               </span>
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
             </div>
-            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-emerald-700">
+            <p className="text-2xl font-semibold mt-1.5 font-mono tracking-tight text-emerald-200">
               {metrics.concluidas}
             </p>
           </button>
@@ -668,69 +821,41 @@ export function GestaoAulasApp({
 
         {/* RBAC Notice Banner for Professor */}
         {!isAdmin && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-white px-4 py-3 text-xs text-zinc-600 shadow-2xs">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] backdrop-blur-xl px-4 py-3 text-xs text-slate-300">
             <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-zinc-900 shrink-0" />
+              <Shield className="h-4 w-4 text-cyan-300 shrink-0" />
               <span>
-                Modo <strong>Professor</strong> ativo: você pode consultar toda a
-                grade e atualizar o <strong>Status da Aula</strong> das aulas alocadas ao seu perfil.
+                Modo <strong className="text-white">Professor</strong> ativo: você pode consultar toda a
+                grade e atualizar o <strong className="text-white">Status da Aula</strong> das aulas alocadas ao seu perfil.
               </span>
             </div>
-            <span className="font-mono text-[11px] text-zinc-400 shrink-0 hidden sm:inline">
+            <span className="font-mono text-[11px] text-cyan-300/70 shrink-0 hidden sm:inline">
               RLS: aulas_update_admin_or_assigned_professor
             </span>
           </div>
         )}
 
-        {/* Global Feedback Toast */}
-        {feedback && (
-          <div
-            role="status"
-            className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs font-medium shadow-xs ${
-              feedback.type === "success"
-                ? "border-emerald-200 bg-emerald-50/90 text-emerald-950"
-                : "border-red-200 bg-red-50/90 text-red-950"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              {feedback.type === "success" ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              ) : (
-                <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
-              )}
-              <span>{feedback.text}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setFeedback(null)}
-              className="text-[11px] font-mono uppercase tracking-wider opacity-70 hover:opacity-100 cursor-pointer"
-            >
-              Fechar
-            </button>
-          </div>
-        )}
-
         {/* ===================================================================
-            TAB 1: GRADE DE AULAS (12 COLUNAS CONCISAS + FILTROS SHADCN)
+            TAB 1: GRADE DE AULAS (FILTROS & CARDS GLASS)
            =================================================================== */}
         {activeTab === "aulas" && (
           <section className="space-y-4">
-            {/* Barra de Filtros Minimalista Padrão shadcn/ui */}
-            <div className="bg-white border border-zinc-200/80 rounded-2xl p-3 shadow-2xs">
+            {/* Barra de Filtros Glass */}
+            <div className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl p-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-center">
                 {/* Busca Textual */}
                 <div className="relative lg:col-span-3">
-                  <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Buscar disciplina, sala, turma..."
-                    className="h-9 w-full rounded-lg border border-zinc-200/90 bg-white pl-8 pr-3 text-xs text-zinc-900 placeholder:text-zinc-400 hover:border-zinc-300 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-950/10 focus:outline-none transition-all shadow-2xs"
+                    className="h-9 w-full rounded-lg border border-white/12 bg-white/[0.04] pl-8 pr-3 text-xs text-slate-100 placeholder:text-slate-400 hover:border-white/25 focus:border-cyan-400/60 focus:bg-white/[0.08] focus:ring-2 focus:ring-cyan-400/15 focus:outline-none transition-all"
                   />
                 </div>
 
-                {/* DatePicker Customizado (Substitui o calendário nativo) */}
+                {/* DatePicker Customizado */}
                 <div className="lg:col-span-2">
                   <DatePicker
                     size="sm"
@@ -781,7 +906,7 @@ export function GestaoAulasApp({
                       type="button"
                       onClick={resetFilters}
                       title="Limpar todos os filtros"
-                      className="h-9 px-2.5 inline-flex items-center gap-1 rounded-lg border border-zinc-200/90 bg-zinc-50 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 transition-colors cursor-pointer shrink-0"
+                      className="h-9 px-2.5 inline-flex items-center gap-1 rounded-lg border border-white/12 bg-white/[0.05] text-xs font-medium text-slate-300 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer shrink-0"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span className="hidden xl:inline">Limpar</span>
@@ -791,17 +916,17 @@ export function GestaoAulasApp({
               </div>
 
               {currentUser.role === "PROFESSOR" && (
-                <div className="mt-2.5 pt-2.5 border-t border-zinc-100 flex items-center justify-between">
-                  <label className="inline-flex items-center gap-2 text-xs text-zinc-700 cursor-pointer select-none">
+                <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={onlyMyClasses}
                       onChange={(e) => setOnlyMyClasses(e.target.checked)}
-                      className="rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950"
+                      className="rounded border-white/25 bg-white/[0.06] text-cyan-400 accent-cyan-400"
                     />
                     <span>Exibir apenas aulas alocadas ao meu perfil docente</span>
                   </label>
-                  <span className="text-[11px] font-mono text-zinc-400">
+                  <span className="text-[11px] font-mono text-slate-400">
                     {filteredAulas.length} aula(s) exibida(s)
                   </span>
                 </div>
@@ -810,12 +935,12 @@ export function GestaoAulasApp({
 
             {/* Lista Concisa de Aulas */}
             {filteredAulas.length === 0 ? (
-              <div className="bg-white border border-zinc-200/80 rounded-2xl p-12 text-center shadow-2xs">
-                <Calendar className="h-8 w-8 text-zinc-300 mx-auto mb-2.5" />
-                <p className="text-sm font-medium text-zinc-800">
+              <div className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl p-12 text-center">
+                <Calendar className="h-8 w-8 text-cyan-300/40 mx-auto mb-2.5" />
+                <p className="text-sm font-medium text-slate-100">
                   Nenhuma aula encontrada para os filtros selecionados.
                 </p>
-                <p className="text-xs text-zinc-500 mt-1">
+                <p className="text-xs text-slate-400 mt-1">
                   Ajuste os filtros na barra superior ou agende uma nova aula na grade.
                 </p>
                 <div className="mt-4 flex items-center justify-center gap-2">
@@ -823,7 +948,7 @@ export function GestaoAulasApp({
                     <button
                       type="button"
                       onClick={resetFilters}
-                      className="h-8 px-3 rounded-lg border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                      className="h-8 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-xs font-medium text-slate-200 hover:bg-white/[0.1] cursor-pointer transition-colors"
                     >
                       Limpar filtros
                     </button>
@@ -832,7 +957,7 @@ export function GestaoAulasApp({
                     <button
                       type="button"
                       onClick={() => handleOpenCreate("aulas")}
-                      className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-zinc-950 text-xs font-medium text-white hover:bg-zinc-800 cursor-pointer"
+                      className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 text-xs font-semibold text-slate-950 hover:brightness-105 cursor-pointer transition-all"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       <span>Agendar Aula</span>
@@ -853,10 +978,10 @@ export function GestaoAulasApp({
                   return (
                     <article
                       key={aula.id}
-                      className="bg-white border border-zinc-200/80 rounded-2xl p-4 sm:p-5 hover:border-zinc-300/90 transition-all shadow-2xs"
+                      className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl p-4 sm:p-5 hover:border-cyan-400/30 hover:bg-[#0e172e]/75 transition-all"
                     >
                       {/* Linha Superior: Metadados de Horário + Seletor Rápido de Status */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-zinc-100">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-white/[0.07]">
                         <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={`inline-flex items-center gap-1.5 font-mono text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${badgeStyle.pill}`}
@@ -867,26 +992,20 @@ export function GestaoAulasApp({
                             {STATUS_LABELS[aula.status]}
                           </span>
 
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-900 bg-zinc-100/80 border border-zinc-200/60 px-2.5 py-0.5 rounded-lg">
-                            <Calendar className="h-3.5 w-3.5 text-zinc-500" />
-                            {formatIsoDatePtBr(aula.data_aula)}
-                          </span>
-
-                          <span className="inline-flex items-center gap-1 font-mono text-xs text-zinc-700 bg-zinc-50 border border-zinc-200/60 px-2.5 py-0.5 rounded-lg">
-                            <Clock className="h-3.5 w-3.5 text-zinc-400" />
-                            {aula.hora_inicio.slice(0, 5)} –{" "}
-                            {aula.hora_fim.slice(0, 5)}
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-200 bg-white/[0.05] border border-white/10 px-2.5 py-0.5 rounded-lg">
+                            <Calendar className="h-3.5 w-3.5 text-cyan-300" />
+                            {formatAulaPeriod(aula.data_aula, aula.data_fim)}
                           </span>
 
                           {aula.sala && (
-                            <span className="inline-flex items-center gap-1 text-xs text-zinc-600 px-2 py-0.5">
-                              <MapPin className="h-3.5 w-3.5 text-zinc-400" />
+                            <span className="inline-flex items-center gap-1 text-xs text-slate-300 px-2 py-0.5">
+                              <MapPin className="h-3.5 w-3.5 text-emerald-300/80" />
                               {aula.sala}
                             </span>
                           )}
                         </div>
 
-                        {/* Controle Rápido de Status via Custom Select + Exclusão */}
+                        {/* Controle Rápido de Status via Custom Select + Ações Admin */}
                         <div className="flex items-center gap-2">
                           {userCanEditStatus && (
                             <div className="w-44">
@@ -899,11 +1018,14 @@ export function GestaoAulasApp({
                                 options={STATUS_OPTIONS}
                                 onChange={(novoStatus) => {
                                   if (novoStatus !== aula.status) {
-                                    runAction(() =>
-                                      updateAulaStatusAction({
-                                        aulaId: aula.id,
-                                        novoStatus: novoStatus as AulaStatus,
-                                      })
+                                    runAction(
+                                      () =>
+                                        updateAulaStatusAction({
+                                          aulaId: aula.id,
+                                          novoStatus: novoStatus as AulaStatus,
+                                        }),
+                                      undefined,
+                                      "Atualização concluída"
                                     );
                                   }
                                 }}
@@ -917,8 +1039,9 @@ export function GestaoAulasApp({
                                 type="button"
                                 disabled={isPending}
                                 title="Editar dados da aula"
+                                aria-label="Editar dados da aula"
                                 onClick={() => handleEditAula(aula)}
-                                className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-transparent text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors cursor-pointer"
+                                className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-transparent text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] hover:border-white/10 transition-colors cursor-pointer"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
@@ -926,10 +1049,25 @@ export function GestaoAulasApp({
                                 type="button"
                                 disabled={isPending}
                                 title="Excluir aula"
+                                aria-label="Excluir aula"
                                 onClick={() =>
-                                  runAction(() => deleteAulaAction(aula.id))
+                                  setPendingDelete({
+                                    kind: "aula",
+                                    id: aula.id,
+                                    badge: aula.disciplina?.codigo ?? undefined,
+                                    title:
+                                      aula.disciplina?.nome ?? "Aula agendada",
+                                    subtitle: `${formatAulaPeriod(
+                                      aula.data_aula,
+                                      aula.data_fim
+                                    )}${
+                                      aula.turma?.codigo
+                                        ? ` · ${aula.turma.codigo}`
+                                        : ""
+                                    }`,
+                                  })
                                 }
-                                className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-transparent text-zinc-400 hover:text-red-600 hover:bg-red-50 hover:border-red-100 transition-colors cursor-pointer"
+                                className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-transparent text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-400/25 transition-colors cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -938,34 +1076,34 @@ export function GestaoAulasApp({
                         </div>
                       </div>
 
-                      {/* Grid Principal de 3 Colunas (Sem colisão de texto) */}
+                      {/* Grid Principal de 3 Colunas */}
                       <div className="mt-3.5 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
                         <div className="md:col-span-5 min-w-0">
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
                             Disciplina
                           </span>
                           <div className="flex items-center gap-2 mt-1">
-                            <span className="font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800 shrink-0">
+                            <span className="font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-200 border border-cyan-400/25 shrink-0">
                               {aula.disciplina?.codigo}
                             </span>
-                            <p className="text-sm font-semibold text-zinc-950 truncate">
+                            <p className="text-sm font-semibold text-white truncate">
                               {aula.disciplina?.nome}
                             </p>
                           </div>
                         </div>
 
                         <div className="md:col-span-4 min-w-0">
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
                             Turma & Período
                           </span>
-                          <p className="text-xs font-medium text-zinc-900 mt-1 truncate">
-                            <span className="font-mono font-semibold text-zinc-700">
+                          <p className="text-xs font-medium text-slate-100 mt-1 truncate">
+                            <span className="font-mono font-semibold text-cyan-200">
                               {aula.turma?.codigo}
                             </span>{" "}
                             · {aula.turma?.nome}
                           </p>
-                          <span className="text-[11px] text-zinc-500 block mt-0.5">
-                             Semestre {aula.turma?.periodo} ·{" "}
+                          <span className="text-[11px] text-slate-400 block mt-0.5">
+                            Semestre {aula.turma?.periodo} ·{" "}
                             {aula.turma?.turno
                               ? TURNO_LABELS[aula.turma.turno]
                               : ""}
@@ -973,31 +1111,31 @@ export function GestaoAulasApp({
                         </div>
 
                         <div className="md:col-span-3 min-w-0">
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
                             Docente Responsável
                           </span>
-                          <p className="text-xs font-medium text-zinc-900 mt-1 truncate">
+                          <p className="text-xs font-medium text-slate-100 mt-1 truncate">
                             {aula.professor?.nome}
                           </p>
-                          <span className="text-[11px] text-zinc-500 block truncate mt-0.5">
+                          <span className="text-[11px] text-slate-400 block truncate mt-0.5">
                             {aula.professor?.email}
                           </span>
                         </div>
                       </div>
 
                       {(aula.conteudo_programatico || aula.observacoes) && (
-                        <div className="mt-3.5 pt-3 border-t border-zinc-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-zinc-600">
+                        <div className="mt-3.5 pt-3 border-t border-white/[0.07] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-300">
                           {aula.conteudo_programatico && (
                             <p className="truncate">
-                              <strong className="font-medium text-zinc-900">
+                              <strong className="font-medium text-white">
                                 Conteúdo:
                               </strong>{" "}
                               {aula.conteudo_programatico}
                             </p>
                           )}
                           {aula.observacoes && (
-                            <p className="text-zinc-500 shrink-0">
-                              <strong className="font-medium text-zinc-700">
+                            <p className="text-slate-400 shrink-0">
+                              <strong className="font-medium text-slate-200">
                                 Obs:
                               </strong>{" "}
                               {aula.observacoes}
@@ -1014,290 +1152,324 @@ export function GestaoAulasApp({
         )}
 
         {/* ===================================================================
-            TAB 2: DISCIPLINAS (TABELA COMPACTA / SMALL)
+            TAB 2: DISCIPLINAS (TABELA GLASS COMPACTA)
            =================================================================== */}
         {activeTab === "disciplinas" && (
-          <section className="bg-white border border-zinc-200/80 rounded-xl overflow-hidden shadow-2xs">
-            <div className="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+          <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <h2 className="text-xs font-semibold text-zinc-950">
+                <h2 className="text-xs font-semibold text-white">
                   Catálogo de Disciplinas
                 </h2>
-                <span className="text-[11px] text-zinc-400 hidden sm:inline">
+                <span className="text-[11px] text-slate-400 hidden sm:inline">
                   · Matriz curricular disponível para alocação nas turmas
                 </span>
               </div>
             </div>
 
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-zinc-200/80 bg-zinc-50/70 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                  <th className="py-2 px-4 w-28">Código</th>
-                  <th className="py-2 px-4">Disciplina</th>
-                  <th className="py-2 px-4 w-32">Carga Horária</th>
-                  {isAdmin && (
-                    <th className="py-2 px-4 w-20 text-right">Ações</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 text-xs">
-                {disciplinas.map((d) => (
-                  <tr
-                    key={d.id}
-                    className="h-9 hover:bg-zinc-50/70 transition-colors"
-                  >
-                    <td className="py-1.5 px-4 font-mono text-[11px] font-semibold text-zinc-900 whitespace-nowrap">
-                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">
-                        {d.codigo}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-4 max-w-0 w-full">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-medium text-zinc-900 shrink-0">
-                          {d.nome}
-                        </span>
-                        {d.ementa && (
-                          <span className="text-zinc-400 truncate">
-                            — {d.ementa}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-1.5 px-4 font-mono text-[11px] text-zinc-700 whitespace-nowrap">
-                      {d.carga_horaria}h
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2.5 px-4 w-28">Código</th>
+                    <th className="py-2.5 px-4">Disciplina</th>
+                    <th className="py-2.5 px-4 w-32">Carga Horária</th>
                     {isAdmin && (
-                      <td className="py-1.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Editar disciplina"
-                            onClick={() => handleEditDisciplina(d)}
-                            className="p-1 rounded-md text-zinc-400 hover:text-zinc-950 hover:bg-zinc-100 cursor-pointer"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Excluir disciplina"
-                            onClick={() =>
-                              runAction(() => deleteDisciplinaAction(d.id))
-                            }
-                            className="p-1 rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      <th className="py-2.5 px-4 w-20 text-right">Ações</th>
                     )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06] text-xs">
+                  {disciplinas.map((d) => (
+                    <tr
+                      key={d.id}
+                      className="h-10 hover:bg-white/[0.04] transition-colors"
+                    >
+                      <td className="py-2 px-4 font-mono text-[11px] font-semibold whitespace-nowrap">
+                        <span className="px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-200 border border-cyan-400/25">
+                          {d.codigo}
+                        </span>
+                      </td>
+                      <td className="py-2 px-4 max-w-0 w-full">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium text-slate-100 shrink-0">
+                            {d.nome}
+                          </span>
+                          {d.ementa && (
+                            <span className="text-slate-400 truncate">
+                              — {d.ementa}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 px-4 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                        {d.carga_horaria}h
+                      </td>
+                      {isAdmin && (
+                        <td className="py-2 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Editar disciplina"
+                              aria-label="Editar disciplina"
+                              onClick={() => handleEditDisciplina(d)}
+                              className="p-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] transition-colors cursor-pointer"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Excluir disciplina"
+                              aria-label="Excluir disciplina"
+                              onClick={() =>
+                                setPendingDelete({
+                                  kind: "disciplina",
+                                  id: d.id,
+                                  badge: d.codigo,
+                                  title: d.nome,
+                                  subtitle: `${d.carga_horaria}h de carga horária`,
+                                })
+                              }
+                              className="p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
         {/* ===================================================================
-            TAB 3: TURMAS (TABELA COMPACTA / SMALL)
+            TAB 3: TURMAS (TABELA GLASS COMPACTA)
            =================================================================== */}
         {activeTab === "turmas" && (
-          <section className="bg-white border border-zinc-200/80 rounded-xl overflow-hidden shadow-2xs">
-            <div className="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+          <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <h2 className="text-xs font-semibold text-zinc-950">
+                <h2 className="text-xs font-semibold text-white">
                   Turmas Ativas
                 </h2>
-                <span className="text-[11px] text-zinc-400 hidden sm:inline">
+                <span className="text-[11px] text-slate-400 hidden sm:inline">
                   · Organizadas por semestre letivo, turno e sala padrão
                 </span>
               </div>
             </div>
 
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-zinc-200/80 bg-zinc-50/70 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                  <th className="py-2 px-4 w-28">Código</th>
-                  <th className="py-2 px-4">Turma</th>
-                  <th className="py-2 px-4 w-44">Período / Turno</th>
-                  <th className="py-2 px-4 w-44">Sala Padrão</th>
-                  {isAdmin && (
-                    <th className="py-2 px-4 w-20 text-right">Ações</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 text-xs">
-                {turmas.map((t) => (
-                  <tr
-                    key={t.id}
-                    className="h-9 hover:bg-zinc-50/70 transition-colors"
-                  >
-                    <td className="py-1.5 px-4 font-mono text-[11px] font-semibold text-zinc-900 whitespace-nowrap">
-                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">
-                        {t.codigo}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-4 font-medium text-zinc-900">
-                      {t.nome}
-                    </td>
-                    <td className="py-1.5 px-4 whitespace-nowrap">
-                      <span className="font-mono text-[11px] text-zinc-800">
-                        {t.periodo}
-                      </span>{" "}
-                      ·{" "}
-                      <span className="text-zinc-500">
-                        {TURNO_LABELS[t.turno as TurnoTipo]}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-4 text-zinc-600 whitespace-nowrap">
-                      {t.sala_padrao ?? "—"}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2.5 px-4 w-28">Código</th>
+                    <th className="py-2.5 px-4">Turma</th>
+                    <th className="py-2.5 px-4 w-44">Período / Turno</th>
+                    <th className="py-2.5 px-4 w-44">Sala Padrão</th>
                     {isAdmin && (
-                      <td className="py-1.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Editar turma"
-                            onClick={() => handleEditTurma(t)}
-                            className="p-1 rounded-md text-zinc-400 hover:text-zinc-950 hover:bg-zinc-100 cursor-pointer"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Excluir turma"
-                            onClick={() =>
-                              runAction(() => deleteTurmaAction(t.id))
-                            }
-                            className="p-1 rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      <th className="py-2.5 px-4 w-20 text-right">Ações</th>
                     )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06] text-xs">
+                  {turmas.map((t) => (
+                    <tr
+                      key={t.id}
+                      className="h-10 hover:bg-white/[0.04] transition-colors"
+                    >
+                      <td className="py-2 px-4 font-mono text-[11px] font-semibold whitespace-nowrap">
+                        <span className="px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-200 border border-cyan-400/25">
+                          {t.codigo}
+                        </span>
+                      </td>
+                      <td className="py-2 px-4 font-medium text-slate-100">
+                        {t.nome}
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        <span className="font-mono text-[11px] text-slate-200">
+                          {t.periodo}
+                        </span>{" "}
+                        ·{" "}
+                        <span className="text-slate-400">
+                          {TURNO_LABELS[t.turno as TurnoTipo]}
+                        </span>
+                      </td>
+                      <td className="py-2 px-4 text-slate-300 whitespace-nowrap">
+                        {t.sala_padrao ?? "—"}
+                      </td>
+                      {isAdmin && (
+                        <td className="py-2 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Editar turma"
+                              aria-label="Editar turma"
+                              onClick={() => handleEditTurma(t)}
+                              className="p-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] transition-colors cursor-pointer"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Excluir turma"
+                              aria-label="Excluir turma"
+                              onClick={() =>
+                                setPendingDelete({
+                                  kind: "turma",
+                                  id: t.id,
+                                  badge: t.codigo,
+                                  title: t.nome,
+                                  subtitle: `${t.periodo} · ${
+                                    TURNO_LABELS[t.turno as TurnoTipo]
+                                  }`,
+                                })
+                              }
+                              className="p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
         {/* ===================================================================
-            TAB 4: PROFESSORES (TABELA COMPACTA / SMALL)
+            TAB 4: PROFESSORES (TABELA GLASS COMPACTA)
            =================================================================== */}
         {activeTab === "professores" && (
-          <section className="bg-white border border-zinc-200/80 rounded-xl overflow-hidden shadow-2xs">
-            <div className="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+          <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <h2 className="text-xs font-semibold text-zinc-950">
+                <h2 className="text-xs font-semibold text-white">
                   Corpo Docente
                 </h2>
-                <span className="text-[11px] text-zinc-400 hidden sm:inline">
+                <span className="text-[11px] text-slate-400 hidden sm:inline">
                   · Lista de professores e status de acesso ao sistema
                 </span>
               </div>
             </div>
 
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-zinc-200/80 bg-zinc-50/70 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                  <th className="py-2 px-4">Docente</th>
-                  <th className="py-2 px-4 w-36">Titulação</th>
-                  <th className="py-2 px-4">Contato</th>
-                  <th className="py-2 px-4 w-36">Acesso ao Sistema</th>
-                  {isAdmin && (
-                    <th className="py-2 px-4 w-20 text-right">Ações</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 text-xs">
-                {professores.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="h-9 hover:bg-zinc-50/70 transition-colors"
-                  >
-                    <td className="py-1.5 px-4 font-medium text-zinc-900 whitespace-nowrap">
-                      {p.nome}
-                    </td>
-                    <td className="py-1.5 px-4 text-zinc-600 whitespace-nowrap">
-                      {p.titulacao}
-                    </td>
-                    <td className="py-1.5 px-4 whitespace-nowrap">
-                      <span className="text-zinc-800">{p.email}</span>
-                      {p.telefone && (
-                        <span className="text-zinc-400 font-mono text-[11px] ml-2">
-                          · {p.telefone}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-4 whitespace-nowrap">
-                      {p.user_id ? (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          Acesso Ativo
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 bg-zinc-100 border border-zinc-200/80 px-2 py-0.5 rounded-full">
-                          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
-                          Sem Acesso
-                        </span>
-                      )}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2.5 px-4">Docente</th>
+                    <th className="py-2.5 px-4 w-36">Titulação</th>
+                    <th className="py-2.5 px-4">Contato</th>
+                    <th className="py-2.5 px-4 w-36">Acesso ao Sistema</th>
                     {isAdmin && (
-                      <td className="py-1.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Editar professor"
-                            onClick={() => handleEditProfessor(p)}
-                            className="p-1 rounded-md text-zinc-400 hover:text-zinc-950 hover:bg-zinc-100 cursor-pointer"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            title="Excluir professor"
-                            onClick={() =>
-                              runAction(() => deleteProfessorAction(p.id))
-                            }
-                            className="p-1 rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      <th className="py-2.5 px-4 w-20 text-right">Ações</th>
                     )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06] text-xs">
+                  {professores.map((p) => (
+                    <tr
+                      key={p.id}
+                      className="h-10 hover:bg-white/[0.04] transition-colors"
+                    >
+                      <td className="py-2 px-4 font-medium text-slate-100 whitespace-nowrap">
+                        {p.nome}
+                      </td>
+                      <td className="py-2 px-4 text-slate-300 whitespace-nowrap">
+                        {p.titulacao}
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        <span className="text-slate-200">{p.email}</span>
+                        {p.telefone && (
+                          <span className="text-slate-400 font-mono text-[11px] ml-2">
+                            · {formatPhoneBr(p.telefone)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        {p.user_id ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-200 bg-emerald-400/12 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                            Acesso Ativo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400 bg-white/[0.06] border border-white/10 px-2 py-0.5 rounded-full">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+                            Sem Acesso
+                          </span>
+                        )}
+                      </td>
+                      {isAdmin && (
+                        <td className="py-2 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Editar professor"
+                              aria-label="Editar professor"
+                              onClick={() => handleEditProfessor(p)}
+                              className="p-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] transition-colors cursor-pointer"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Excluir professor"
+                              aria-label="Excluir professor"
+                              onClick={() =>
+                                setPendingDelete({
+                                  kind: "professor",
+                                  id: p.id,
+                                  badge: p.titulacao,
+                                  title: p.nome,
+                                  subtitle: p.email,
+                                })
+                              }
+                              className="p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
       </main>
 
       {/* =====================================================================
-          DIALOG 1: AGENDAR OU EDITAR AULA (COM SELECT, DATEPICKER & TIMEPICKER)
+          DIALOG 1: AGENDAR OU EDITAR AULA (COM SELECT & DATEPICKER)
          ===================================================================== */}
       <Dialog
         open={openModal === "aulas"}
         onClose={handleCloseModal}
         eyebrow="Agendamento Acadêmico"
-        title={editingAula ? "Editar Aula na Grade" : "Agendar Nova Aula na Grade"}
+        title={
+          editingAula ? "Editar Aula na Grade" : "Agendar Nova Aula na Grade"
+        }
         description={
           editingAula
-            ? "Atualize os detalhes, horários ou docentes desta aula."
-            : "Validação automática contra conflitos de horário de turma ou professor."
+            ? "Atualize o período, disciplina, turma ou docente desta aula."
+            : "Defina a data inicial, data final, turma e docente responsável."
         }
       >
         {liveConflict && (
-          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-200 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
             <span>{liveConflict.message}</span>
           </div>
         )}
@@ -1310,7 +1482,8 @@ export function GestaoAulasApp({
             if (editingAula) {
               runAction(
                 () => updateAulaAction(editingAula.id, fd),
-                () => handleCloseModal()
+                () => handleCloseModal(),
+                "Atualização concluída"
               );
             } else {
               runAction(
@@ -1322,16 +1495,15 @@ export function GestaoAulasApp({
                     observacoes: "",
                   }));
                   handleCloseModal();
-                }
+                },
+                "Cadastro realizado"
               );
             }
           }}
           className="space-y-4"
         >
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Disciplina *
-            </label>
+            <label className={GLASS_LABEL_CLASS}>Disciplina *</label>
             <Select
               name="disciplina_id"
               value={draftAula.disciplina_id}
@@ -1345,9 +1517,7 @@ export function GestaoAulasApp({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Turma *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Turma *</label>
               <Select
                 name="turma_id"
                 value={draftAula.turma_id}
@@ -1360,9 +1530,7 @@ export function GestaoAulasApp({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Professor(a) *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Professor(a) *</label>
               <Select
                 name="professor_id"
                 value={draftAula.professor_id}
@@ -1376,11 +1544,9 @@ export function GestaoAulasApp({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Data da Aula *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Data Inicial *</label>
               <DatePicker
                 name="data_aula"
                 value={draftAula.data_aula}
@@ -1392,37 +1558,21 @@ export function GestaoAulasApp({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Horário Inicial *
-              </label>
-              <TimePicker
-                name="hora_inicio"
-                value={draftAula.hora_inicio}
-                onChange={(time) =>
-                  setDraftAula({ ...draftAula, hora_inicio: time })
+              <label className={GLASS_LABEL_CLASS}>Data Final *</label>
+              <DatePicker
+                name="data_fim"
+                value={draftAula.data_fim}
+                onChange={(iso) =>
+                  setDraftAula({ ...draftAula, data_fim: iso })
                 }
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Horário Final *
-              </label>
-              <TimePicker
-                name="hora_fim"
-                value={draftAula.hora_fim}
-                onChange={(time) =>
-                  setDraftAula({ ...draftAula, hora_fim: time })
-                }
+                highlightedDates={scheduledDates}
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Status
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Status</label>
               <Select
                 name="status"
                 value={draftAula.status}
@@ -1435,9 +1585,7 @@ export function GestaoAulasApp({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Sala / Laboratório
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Sala / Laboratório</label>
               <input
                 type="text"
                 name="sala"
@@ -1446,13 +1594,13 @@ export function GestaoAulasApp({
                 onChange={(e) =>
                   setDraftAula({ ...draftAula, sala: e.target.value })
                 }
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-950/10 focus:outline-none shadow-2xs"
+                className={GLASS_INPUT_CLASS}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+            <label className={GLASS_LABEL_CLASS}>
               Conteúdo Programático da Aula
             </label>
             <textarea
@@ -1466,7 +1614,7 @@ export function GestaoAulasApp({
                   conteudo_programatico: e.target.value,
                 })
               }
-              className="w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 py-2.5 text-xs text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-950/10 focus:outline-none shadow-2xs"
+              className={GLASS_TEXTAREA_CLASS}
             />
           </div>
 
@@ -1474,17 +1622,19 @@ export function GestaoAulasApp({
             <button
               type="button"
               onClick={handleCloseModal}
-              className="h-9 px-4 rounded-xl border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+              className={GLASS_CANCEL_BTN_CLASS}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isPending || Boolean(liveConflict)}
-              className="h-9 inline-flex items-center gap-1.5 rounded-xl bg-zinc-950 px-4 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors cursor-pointer"
+              className={GLASS_PRIMARY_BTN_CLASS}
             >
               <Plus className="h-4 w-4" />
-              <span>{editingAula ? "Salvar Alterações" : "Confirmar Agendamento"}</span>
+              <span>
+                {editingAula ? "Salvar Alterações" : "Confirmar Agendamento"}
+              </span>
             </button>
           </div>
         </form>
@@ -1497,7 +1647,9 @@ export function GestaoAulasApp({
         open={openModal === "disciplinas"}
         onClose={handleCloseModal}
         eyebrow="Catálogo Curricular"
-        title={editingDisciplina ? "Editar Disciplina" : "Cadastrar Nova Disciplina"}
+        title={
+          editingDisciplina ? "Editar Disciplina" : "Cadastrar Nova Disciplina"
+        }
       >
         <form
           key={editingDisciplina ? editingDisciplina.id : "new-disciplina"}
@@ -1508,7 +1660,8 @@ export function GestaoAulasApp({
             if (editingDisciplina) {
               runAction(
                 () => updateDisciplinaAction(editingDisciplina.id, fd),
-                () => handleCloseModal()
+                () => handleCloseModal(),
+                "Atualização concluída"
               );
             } else {
               runAction(
@@ -1516,7 +1669,8 @@ export function GestaoAulasApp({
                 () => {
                   form.reset();
                   handleCloseModal();
-                }
+                },
+                "Cadastro realizado"
               );
             }
           }}
@@ -1524,21 +1678,17 @@ export function GestaoAulasApp({
         >
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Código *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Código *</label>
               <input
                 name="codigo"
                 required
                 defaultValue={editingDisciplina?.codigo ?? ""}
                 placeholder="ENG-401"
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs font-mono uppercase shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={`${GLASS_INPUT_CLASS} font-mono uppercase`}
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Carga Horária (h) *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Carga Horária (h) *</label>
               <input
                 name="carga_horaria"
                 type="number"
@@ -1546,34 +1696,30 @@ export function GestaoAulasApp({
                 max={1000}
                 defaultValue={editingDisciplina?.carga_horaria ?? 60}
                 required
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs font-mono shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={`${GLASS_INPUT_CLASS} font-mono`}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Nome da Disciplina *
-            </label>
+            <label className={GLASS_LABEL_CLASS}>Nome da Disciplina *</label>
             <input
               name="nome"
               required
               defaultValue={editingDisciplina?.nome ?? ""}
               placeholder="Ex: Engenharia de Software II"
-              className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+              className={GLASS_INPUT_CLASS}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Ementa Resumida
-            </label>
+            <label className={GLASS_LABEL_CLASS}>Ementa Resumida</label>
             <textarea
               name="ementa"
               rows={3}
               defaultValue={editingDisciplina?.ementa ?? ""}
               placeholder="Principais tópicos da disciplina..."
-              className="w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 py-2.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+              className={GLASS_TEXTAREA_CLASS}
             />
           </div>
 
@@ -1581,17 +1727,19 @@ export function GestaoAulasApp({
             <button
               type="button"
               onClick={handleCloseModal}
-              className="h-9 px-4 rounded-xl border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+              className={GLASS_CANCEL_BTN_CLASS}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isPending}
-              className="h-9 inline-flex items-center gap-1.5 rounded-xl bg-zinc-950 px-4 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
+              className={GLASS_PRIMARY_BTN_CLASS}
             >
               <Plus className="h-4 w-4" />
-              <span>{editingDisciplina ? "Salvar Alterações" : "Salvar Disciplina"}</span>
+              <span>
+                {editingDisciplina ? "Salvar Alterações" : "Salvar Disciplina"}
+              </span>
             </button>
           </div>
         </form>
@@ -1615,7 +1763,8 @@ export function GestaoAulasApp({
             if (editingTurma) {
               runAction(
                 () => updateTurmaAction(editingTurma.id, fd),
-                () => handleCloseModal()
+                () => handleCloseModal(),
+                "Atualização concluída"
               );
             } else {
               runAction(
@@ -1623,7 +1772,8 @@ export function GestaoAulasApp({
                 () => {
                   form.reset();
                   handleCloseModal();
-                }
+                },
+                "Cadastro realizado"
               );
             }
           }}
@@ -1631,49 +1781,41 @@ export function GestaoAulasApp({
         >
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Código *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Código *</label>
               <input
                 name="codigo"
                 required
                 defaultValue={editingTurma?.codigo ?? ""}
                 placeholder="ADS-4N"
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs font-mono uppercase shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={`${GLASS_INPUT_CLASS} font-mono uppercase`}
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Período Letivo *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Período Letivo *</label>
               <input
                 name="periodo"
                 required
                 defaultValue={editingTurma?.periodo ?? "2026.2"}
                 placeholder="2026.2"
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs font-mono shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={`${GLASS_INPUT_CLASS} font-mono`}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Nome da Turma *
-            </label>
+            <label className={GLASS_LABEL_CLASS}>Nome da Turma *</label>
             <input
               name="nome"
               required
               defaultValue={editingTurma?.nome ?? ""}
               placeholder="Ex: Análise e Desenv. de Sistemas - 4º Sem"
-              className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+              className={GLASS_INPUT_CLASS}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Turno *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Turno *</label>
               <Select
                 name="turno"
                 value={draftTurno}
@@ -1683,14 +1825,12 @@ export function GestaoAulasApp({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Sala Padrão
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Sala Padrão</label>
               <input
                 name="sala_padrao"
                 defaultValue={editingTurma?.sala_padrao ?? ""}
                 placeholder="Lab 03 - Bloco B"
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={GLASS_INPUT_CLASS}
               />
             </div>
           </div>
@@ -1699,14 +1839,14 @@ export function GestaoAulasApp({
             <button
               type="button"
               onClick={handleCloseModal}
-              className="h-9 px-4 rounded-xl border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+              className={GLASS_CANCEL_BTN_CLASS}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isPending}
-              className="h-9 inline-flex items-center gap-1.5 rounded-xl bg-zinc-950 px-4 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
+              className={GLASS_PRIMARY_BTN_CLASS}
             >
               <Plus className="h-4 w-4" />
               <span>{editingTurma ? "Salvar Alterações" : "Salvar Turma"}</span>
@@ -1722,7 +1862,9 @@ export function GestaoAulasApp({
         open={openModal === "professores"}
         onClose={handleCloseModal}
         eyebrow="Corpo Docente"
-        title={editingProfessor ? "Editar Professor(a)" : "Cadastrar Professor(a)"}
+        title={
+          editingProfessor ? "Editar Professor(a)" : "Cadastrar Professor(a)"
+        }
       >
         <form
           key={editingProfessor ? editingProfessor.id : "new-prof"}
@@ -1733,52 +1875,49 @@ export function GestaoAulasApp({
             if (editingProfessor) {
               runAction(
                 () => updateProfessorAction(editingProfessor.id, fd),
-                () => handleCloseModal()
+                () => handleCloseModal(),
+                "Atualização concluída"
               );
             } else {
               runAction(
                 () => createProfessorAction(fd),
                 () => {
                   form.reset();
+                  setDraftTelefone("");
                   handleCloseModal();
-                }
+                },
+                "Cadastro realizado"
               );
             }
           }}
           className="space-y-4"
         >
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Nome Completo *
-            </label>
+            <label className={GLASS_LABEL_CLASS}>Nome Completo *</label>
             <input
               name="nome"
               required
               defaultValue={editingProfessor?.nome ?? ""}
               placeholder="Ex: Prof. Dr. Marcos Vinicius"
-              className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+              className={GLASS_INPUT_CLASS}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              E-mail Institucional *
-            </label>
+            <label className={GLASS_LABEL_CLASS}>E-mail Institucional *</label>
             <input
               name="email"
               type="email"
               required
               defaultValue={editingProfessor?.email ?? ""}
               placeholder="marcos.vinicius@unopar.br"
-              className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+              className={GLASS_INPUT_CLASS}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Titulação *
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Titulação *</label>
               <Select
                 name="titulacao"
                 value={draftTitulacao}
@@ -1788,14 +1927,16 @@ export function GestaoAulasApp({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Telefone
-              </label>
+              <label className={GLASS_LABEL_CLASS}>Telefone</label>
               <input
                 name="telefone"
-                defaultValue={editingProfessor?.telefone ?? ""}
+                type="tel"
+                inputMode="numeric"
+                maxLength={15}
+                value={draftTelefone}
+                onChange={(e) => setDraftTelefone(formatPhoneBr(e.target.value))}
                 placeholder="(43) 99999-0000"
-                className="h-10 w-full rounded-xl border border-zinc-200/90 bg-white px-3.5 text-xs shadow-2xs focus:border-zinc-900 focus:outline-none"
+                className={GLASS_INPUT_CLASS}
               />
             </div>
           </div>
@@ -1804,21 +1945,173 @@ export function GestaoAulasApp({
             <button
               type="button"
               onClick={handleCloseModal}
-              className="h-9 px-4 rounded-xl border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+              className={GLASS_CANCEL_BTN_CLASS}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isPending}
-              className="h-9 inline-flex items-center gap-1.5 rounded-xl bg-zinc-950 px-4 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
+              className={GLASS_PRIMARY_BTN_CLASS}
             >
               <Users className="h-4 w-4" />
-              <span>{editingProfessor ? "Salvar Alterações" : "Salvar Professor(a)"}</span>
+              <span>
+                {editingProfessor
+                  ? "Salvar Alterações"
+                  : "Salvar Professor(a)"}
+              </span>
             </button>
           </div>
         </form>
       </Dialog>
+
+      {/* =====================================================================
+          DIALOG 5: CONFIRMAÇÃO DE EXCLUSÃO
+         ===================================================================== */}
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onClose={() => {
+          if (!isPending) setPendingDelete(null);
+        }}
+        eyebrow="Confirmação de Exclusão"
+        title={
+          pendingDelete ? DELETE_DIALOG_META[pendingDelete.kind].title : ""
+        }
+        description={
+          pendingDelete
+            ? DELETE_DIALOG_META[pendingDelete.kind].description
+            : undefined
+        }
+      >
+        {pendingDelete && (
+          <div className="space-y-5">
+            <div className="rounded-xl border border-rose-400/25 bg-rose-500/[0.08] p-4 flex items-start gap-3">
+              <div className="h-9 w-9 rounded-lg bg-rose-500/15 border border-rose-400/30 text-rose-300 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-4.5 w-4.5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {pendingDelete.badge && (
+                    <span className="font-mono text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-rose-400/15 text-rose-200 border border-rose-400/30 shrink-0">
+                      {pendingDelete.badge}
+                    </span>
+                  )}
+                  <p className="text-sm font-semibold text-white truncate">
+                    {pendingDelete.title}
+                  </p>
+                </div>
+                {pendingDelete.subtitle && (
+                  <p className="text-xs text-slate-300 mt-1 truncate">
+                    {pendingDelete.subtitle}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-1 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => setPendingDelete(null)}
+                className={`${GLASS_CANCEL_BTN_CLASS} disabled:opacity-40`}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={handleConfirmDelete}
+                className="h-9 inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-rose-500 via-red-500 to-orange-500 px-4 text-xs font-semibold text-white shadow-[0_4px_20px_-4px_rgba(244,63,94,0.5)] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>
+                  {isPending ? "Excluindo..." : "Confirmar Exclusão"}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* =====================================================================
+          FLOATING ORBITAL GLASS TOAST (VIEWPORT-FIXED)
+         ===================================================================== */}
+      {feedback && (
+        <div
+          key={feedback.id}
+          role={feedback.type === "error" ? "alert" : "status"}
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-[60] max-w-sm w-[calc(100vw-2.5rem)] login-card-enter"
+        >
+          <div
+            className={`relative overflow-hidden rounded-2xl border backdrop-blur-2xl p-4 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.85)] ring-1 ring-white/5 ${
+              feedback.type === "success"
+                ? "border-emerald-400/35 bg-[#0a1624]/92 shadow-[0_0_32px_-10px_rgba(52,211,153,0.45)]"
+                : "border-rose-400/35 bg-[#190c17]/92 shadow-[0_0_32px_-10px_rgba(244,63,94,0.45)]"
+            }`}
+          >
+            {/* Top specular highlight */}
+            <div
+              aria-hidden="true"
+              className={`pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent to-transparent ${
+                feedback.type === "success"
+                  ? "via-emerald-300/70"
+                  : "via-rose-300/70"
+              }`}
+            />
+
+            <div className="flex items-start gap-3">
+              <div
+                className={`h-8 w-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                  feedback.type === "success"
+                    ? "bg-emerald-400/15 border-emerald-400/30 text-emerald-300"
+                    : "bg-rose-400/15 border-rose-400/30 text-rose-300"
+                }`}
+              >
+                {feedback.type === "success" ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4" />
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1 pt-0.5">
+                <p
+                  className={`font-mono text-[10px] uppercase tracking-widest ${
+                    feedback.type === "success"
+                      ? "text-emerald-300"
+                      : "text-rose-300"
+                  }`}
+                >
+                  {feedback.title}
+                </p>
+                <p className="text-xs font-medium text-slate-100 mt-0.5 leading-relaxed">
+                  {feedback.text}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFeedback(null)}
+                aria-label="Fechar notificação"
+                className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Auto-dismiss progress bar */}
+            <div
+              aria-hidden="true"
+              className={`toast-progress-bar absolute inset-x-0 bottom-0 h-0.5 ${
+                feedback.type === "success"
+                  ? "bg-gradient-to-r from-cyan-400 to-emerald-400"
+                  : "bg-gradient-to-r from-rose-400 to-orange-400"
+              }`}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

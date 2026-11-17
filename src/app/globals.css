@@ -1,11 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --bg-canvas: #fafafa;
-  --bg-surface: #ffffff;
-  --fg-primary: #09090b;
-  --fg-muted: #52525b;
-  --border-subtle: #e4e4e7;
+  color-scheme: dark;
+  --bg-canvas: #060913;
+  --bg-surface: #0b1224;
+  --fg-primary: #f8fafc;
+  --fg-muted: #94a3b8;
+  --border-subtle: rgba(255, 255, 255, 0.12);
 }
 
 body {
@@ -13,6 +14,30 @@ body {
   color: var(--fg-primary);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle dark scrollbar for glass panels and dropdowns */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.22);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(56, 189, 248, 0.4);
 }
 
 /* Remove qualquer outline/borda azul nativa do navegador em botões e elementos clicáveis */
@@ -32,4 +57,119 @@ button:focus-visible,
 [type="submit"]:focus-visible {
   outline: none !important;
   box-shadow: none;
+}
+
+/* Login Orbital Glass & Aurora animations */
+@keyframes loginOrbitSlow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loginOrbitReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes loginPulseAurora {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translate3d(18px, -14px, 0) scale(1.06);
+  }
+}
+
+@keyframes loginCardEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes loginShimmer {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+
+.login-orbit-slow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: loginOrbitSlow 52s linear infinite;
+}
+
+.login-orbit-reverse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: loginOrbitReverse 38s linear infinite;
+}
+
+.login-aurora {
+  animation: loginPulseAurora 11s ease-in-out infinite;
+}
+
+.login-aurora-delayed {
+  animation: loginPulseAurora 14s ease-in-out infinite reverse;
+}
+
+.login-card-enter {
+  animation: loginCardEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-shimmer-track {
+  animation: loginShimmer 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes toastProgress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toast-progress-bar {
+  transform-origin: left;
+  animation: toastProgress 4.2s linear forwards;
+}
+
+/* Preserva a aparência dark-glass quando o navegador aplica autofill */
+.login-glass-input:-webkit-autofill,
+.login-glass-input:-webkit-autofill:hover,
+.login-glass-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc;
+  -webkit-box-shadow: 0 0 0 1000px rgba(15, 23, 42, 0.85) inset;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: #67e8f9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-orbit-slow,
+  .login-orbit-reverse,
+  .login-aurora,
+  .login-aurora-delayed,
+  .login-card-enter,
+  .login-shimmer-track,
+  .toast-progress-bar {
+    animation: none !important;
+  }
 }

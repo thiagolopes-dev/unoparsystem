@@ -33,7 +33,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="dialog-title"
@@ -41,26 +41,32 @@ export function Dialog({
       {/* Backdrop */}
       <div
         onClick={onClose}
-        className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px] transition-opacity"
+        className="fixed inset-0 bg-[#02040a]/75 backdrop-blur-md transition-opacity"
       />
 
       {/* Dialog Panel */}
-      <div className="relative z-10 w-full max-w-lg rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-2xl shadow-zinc-950/15 ring-1 ring-black/5">
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-100 pb-4 mb-5">
+      <div className="relative z-10 w-full max-w-lg rounded-2xl border border-white/15 bg-[#0b1224]/90 backdrop-blur-2xl p-6 text-slate-100 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.85),0_0_45px_-16px_rgba(34,211,238,0.2)] ring-1 ring-white/5 my-auto">
+        {/* Top specular cyan glass edge */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent"
+        />
+
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4 mb-5">
           <div>
             {eyebrow && (
-              <span className="block font-mono text-[10px] uppercase tracking-widest text-zinc-400 mb-0.5">
+              <span className="block font-mono text-[10px] uppercase tracking-widest text-cyan-400 mb-0.5">
                 {eyebrow}
               </span>
             )}
             <h2
               id="dialog-title"
-              className="text-base font-semibold tracking-tight text-zinc-950"
+              className="text-base font-semibold tracking-tight text-white"
             >
               {title}
             </h2>
             {description && (
-              <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{description}</p>
             )}
           </div>
 
@@ -68,7 +74,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="Fechar janela"
-            className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-900 transition-colors cursor-pointer"
+            className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-transparent text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white focus-visible:border-cyan-400/50 focus-visible:text-white transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>

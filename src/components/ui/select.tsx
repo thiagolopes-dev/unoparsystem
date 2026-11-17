@@ -132,14 +132,14 @@ export function Select({
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((prev) => !prev)}
-        className={`group w-full inline-flex items-center justify-between gap-2 border bg-white text-left font-medium transition-all cursor-pointer select-none ${sizeClasses} ${
+        className={`group w-full inline-flex items-center justify-between gap-2 border backdrop-blur-md text-left font-medium transition-all cursor-pointer select-none ${sizeClasses} ${
           open
-            ? "border-zinc-900 ring-2 ring-zinc-950/10 text-zinc-950"
-            : "border-zinc-200/90 text-zinc-800 hover:border-zinc-300 hover:bg-zinc-50/60"
-        } disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs`}
+            ? "border-cyan-400/60 bg-white/[0.08] ring-2 ring-cyan-400/15 text-white"
+            : "border-white/12 bg-white/[0.04] text-slate-100 hover:border-white/25 hover:bg-white/[0.07] focus-visible:border-cyan-400/50"
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
       >
         <span className="flex items-center gap-2 min-w-0 truncate">
-          {icon && <span className="text-zinc-400 shrink-0">{icon}</span>}
+          {icon && <span className="text-slate-400 shrink-0">{icon}</span>}
           {selectedOption?.dotColor && (
             <span
               className={`h-2 w-2 rounded-full shrink-0 ${selectedOption.dotColor}`}
@@ -148,22 +148,22 @@ export function Select({
           {selectedOption ? (
             <span className="flex items-center gap-1.5 truncate">
               {selectedOption.badge && (
-                <span className="font-mono text-[10px] font-semibold uppercase tracking-tight px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-700 shrink-0">
+                <span className="font-mono text-[10px] font-semibold uppercase tracking-tight px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-300 border border-cyan-400/25 shrink-0">
                   {selectedOption.badge}
                 </span>
               )}
-              <span className="truncate text-zinc-900">
+              <span className="truncate text-slate-100">
                 {selectedOption.label}
               </span>
             </span>
           ) : (
-            <span className="text-zinc-400 truncate">{placeholder}</span>
+            <span className="text-slate-400 truncate">{placeholder}</span>
           )}
         </span>
 
         <ChevronDown
-          className={`h-3.5 w-3.5 text-zinc-400 shrink-0 transition-transform duration-150 group-hover:text-zinc-600 ${
-            open ? "rotate-180 text-zinc-900" : ""
+          className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-150 group-hover:text-slate-200 ${
+            open ? "rotate-180 text-cyan-300" : ""
           }`}
         />
       </button>
@@ -172,13 +172,13 @@ export function Select({
         <div
           id={listboxId}
           role="listbox"
-          className={`absolute z-50 mt-1.5 min-w-[220px] w-full rounded-xl border border-zinc-200/90 bg-white p-1.5 shadow-xl shadow-zinc-950/10 ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-100 ${
+          className={`absolute z-50 mt-1.5 min-w-[220px] w-full rounded-xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-1.5 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >
           {showSearch && (
             <div className="relative mb-1.5 px-1 pt-0.5">
-              <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -188,13 +188,14 @@ export function Select({
                   setHighlightedIndex(0);
                 }}
                 placeholder={searchPlaceholder}
-                className="w-full h-8 rounded-lg border border-zinc-200 bg-zinc-50/70 pl-8 pr-7 text-xs text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:border-zinc-900 focus:outline-none"
+                className="w-full h-8 rounded-lg border border-white/12 bg-white/[0.05] pl-8 pr-7 text-xs text-slate-100 placeholder:text-slate-400/75 focus:bg-white/[0.09] focus:border-cyan-400/60 focus:outline-none"
               />
               {query && (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                  aria-label="Limpar busca"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -204,7 +205,7 @@ export function Select({
 
           <div className="max-h-64 overflow-y-auto space-y-0.5 pr-0.5">
             {filteredOptions.length === 0 ? (
-              <div className="py-6 px-3 text-center text-xs text-zinc-400">
+              <div className="py-6 px-3 text-center text-xs text-slate-400">
                 Nenhum resultado encontrado.
               </div>
             ) : (
@@ -224,26 +225,26 @@ export function Select({
                     }}
                     className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
                       isSelected
-                        ? "bg-zinc-950 text-white font-medium"
+                        ? "bg-gradient-to-r from-cyan-400/20 to-emerald-400/15 border border-cyan-400/30 text-white font-medium"
                         : isHighlighted
-                        ? "bg-zinc-100 text-zinc-950"
-                        : "text-zinc-700 hover:bg-zinc-100/80"
+                        ? "bg-white/[0.08] border border-transparent text-white"
+                        : "border border-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white"
                     }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       {option.dotColor && (
                         <span
                           className={`h-2 w-2 rounded-full shrink-0 ${
-                            isSelected ? "ring-2 ring-white/40" : ""
+                            isSelected ? "ring-2 ring-cyan-300/40" : ""
                           } ${option.dotColor}`}
                         />
                       )}
                       {option.badge && (
                         <span
-                          className={`font-mono text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                          className={`font-mono text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded shrink-0 border ${
                             isSelected
-                              ? "bg-white/15 text-white"
-                              : "bg-zinc-100 text-zinc-600"
+                              ? "bg-cyan-400/20 text-cyan-200 border-cyan-400/30"
+                              : "bg-white/[0.07] text-slate-300 border-white/10"
                           }`}
                         >
                           {option.badge}
@@ -254,7 +255,7 @@ export function Select({
                         {option.description && (
                           <span
                             className={`block text-[10px] truncate ${
-                              isSelected ? "text-zinc-300" : "text-zinc-400"
+                              isSelected ? "text-cyan-200/80" : "text-slate-400"
                             }`}
                           >
                             {option.description}
@@ -264,7 +265,7 @@ export function Select({
                     </div>
 
                     {isSelected && (
-                      <Check className="h-3.5 w-3.5 shrink-0 text-white" />
+                      <Check className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
                     )}
                   </button>
                 );

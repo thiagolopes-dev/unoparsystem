@@ -214,24 +214,24 @@ export function DatePicker({
         <button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
-          className={`w-full inline-flex items-center justify-between gap-2 border bg-white text-left font-medium transition-all cursor-pointer select-none shadow-2xs ${sizeClasses} ${
+          className={`w-full inline-flex items-center justify-between gap-2 border backdrop-blur-md text-left font-medium transition-all cursor-pointer select-none ${sizeClasses} ${
             open
-              ? "border-zinc-900 ring-2 ring-zinc-950/10 text-zinc-950"
-              : "border-zinc-200/90 text-zinc-800 hover:border-zinc-300 hover:bg-zinc-50/60"
+              ? "border-cyan-400/60 bg-white/[0.08] ring-2 ring-cyan-400/15 text-white"
+              : "border-white/12 bg-white/[0.04] text-slate-100 hover:border-white/25 hover:bg-white/[0.07] focus-visible:border-cyan-400/50"
           } ${allowClear && value ? "pr-8" : ""}`}
         >
           <span className="flex items-center gap-2 truncate">
             <CalendarIcon
               className={`h-3.5 w-3.5 shrink-0 ${
-                value ? "text-zinc-900" : "text-zinc-400"
+                value ? "text-cyan-300" : "text-slate-400"
               }`}
             />
             {value ? (
-              <span className="text-zinc-900 font-medium">
+              <span className="text-slate-100 font-medium">
                 {formatIsoDatePtBr(value)}
               </span>
             ) : (
-              <span className="text-zinc-400">{placeholder}</span>
+              <span className="text-slate-400">{placeholder}</span>
             )}
           </span>
         </button>
@@ -240,11 +240,12 @@ export function DatePicker({
           <button
             type="button"
             title="Limpar data"
+            aria-label="Limpar data"
             onClick={(e) => {
               e.stopPropagation();
               onChange("");
             }}
-            className="absolute right-2 p-1 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors cursor-pointer"
+            className="absolute right-2 p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -252,26 +253,26 @@ export function DatePicker({
       </div>
 
       {open && (
-        <div className="absolute left-0 z-50 mt-1.5 w-[292px] rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xl shadow-zinc-950/10 ring-1 ring-black/5 select-none">
+        <div className="absolute left-0 z-50 mt-1.5 w-[292px] rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-4 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none">
           {/* Header: Month + Year & Nav */}
           <div className="flex items-center justify-between mb-3">
             <button
               type="button"
               onClick={prevMonth}
-              className="h-7 w-7 inline-flex items-center justify-center rounded-lg border border-zinc-200/80 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 transition-colors cursor-pointer"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-lg border border-white/12 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer"
               aria-label="Mês anterior"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
 
-            <div className="text-xs font-semibold text-zinc-950 tracking-tight">
+            <div className="text-xs font-semibold text-white tracking-tight">
               {MONTHS_PT[viewMonth]} {viewYear}
             </div>
 
             <button
               type="button"
               onClick={nextMonth}
-              className="h-7 w-7 inline-flex items-center justify-center rounded-lg border border-zinc-200/80 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 transition-colors cursor-pointer"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-lg border border-white/12 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer"
               aria-label="Próximo mês"
             >
               <ChevronRight className="h-4 w-4" />
@@ -283,7 +284,7 @@ export function DatePicker({
             {WEEKDAYS_PT.map((day) => (
               <div
                 key={day}
-                className="h-7 flex items-center justify-center text-[10px] font-mono uppercase tracking-wider text-zinc-400"
+                className="h-7 flex items-center justify-center text-[10px] font-mono uppercase tracking-wider text-slate-400"
               >
                 {day}
               </div>
@@ -307,19 +308,21 @@ export function DatePicker({
                   }}
                   className={`relative h-8 w-full rounded-lg text-xs font-mono flex flex-col items-center justify-center transition-all cursor-pointer ${
                     isSelected
-                      ? "bg-zinc-950 text-white font-semibold shadow-xs"
+                      ? "bg-gradient-to-br from-cyan-400 to-emerald-400 text-slate-950 font-semibold shadow-[0_0_16px_-2px_rgba(34,211,238,0.6)]"
                       : isToday
-                      ? "bg-zinc-100 text-zinc-950 font-semibold ring-1 ring-inset ring-zinc-300"
+                      ? "bg-cyan-400/10 text-cyan-200 font-semibold ring-1 ring-inset ring-cyan-400/50"
                       : cell.inCurrentMonth
-                      ? "text-zinc-800 hover:bg-zinc-100"
-                      : "text-zinc-300 hover:bg-zinc-50 hover:text-zinc-500"
+                      ? "text-slate-200 hover:bg-white/[0.08] hover:text-white"
+                      : "text-slate-600 hover:bg-white/[0.04] hover:text-slate-400"
                   }`}
                 >
                   <span>{cell.day}</span>
                   {hasClass && (
                     <span
                       className={`h-1 w-1 rounded-full mt-0.5 ${
-                        isSelected ? "bg-emerald-400" : "bg-zinc-950"
+                        isSelected
+                          ? "bg-slate-950"
+                          : "bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.8)]"
                       }`}
                     />
                   )}
@@ -329,19 +332,19 @@ export function DatePicker({
           </div>
 
           {/* Quick Shortcuts Footer */}
-          <div className="mt-3 pt-2.5 border-t border-zinc-100 flex items-center justify-between gap-1.5">
+          <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between gap-1.5">
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => selectQuickDate(0)}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-950 hover:text-white transition-colors cursor-pointer"
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-white/[0.06] border border-white/10 text-slate-200 hover:bg-cyan-400/20 hover:border-cyan-400/35 hover:text-cyan-200 transition-colors cursor-pointer"
               >
                 Hoje
               </button>
               <button
                 type="button"
                 onClick={() => selectQuickDate(1)}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-950 hover:text-white transition-colors cursor-pointer"
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-white/[0.06] border border-white/10 text-slate-200 hover:bg-cyan-400/20 hover:border-cyan-400/35 hover:text-cyan-200 transition-colors cursor-pointer"
               >
                 Amanhã
               </button>
@@ -354,7 +357,7 @@ export function DatePicker({
                   onChange("");
                   setOpen(false);
                 }}
-                className="px-2 py-1 rounded-md text-[11px] font-medium text-zinc-500 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                className="px-2 py-1 rounded-md text-[11px] font-medium text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer"
               >
                 Limpar
               </button>
