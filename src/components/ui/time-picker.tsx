@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Clock, ChevronDown } from "lucide-react";
+import { FloatingPanel } from "@/components/ui/floating-panel";
 
 const ACADEMIC_SLOTS = [
   "07:30",
@@ -28,6 +29,7 @@ interface TimePickerProps {
   name?: string;
   value: string;
   onChange: (time: string) => void;
+  align?: "left" | "right";
   className?: string;
 }
 
@@ -35,10 +37,12 @@ export function TimePicker({
   name,
   value,
   onChange,
+  align = "left",
   className = "",
 }: TimePickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const [currentHour = "19", currentMinute = "00"] = (value || "19:00").split(
     ":"
@@ -47,21 +51,25 @@ export function TimePicker({
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
       ) {
         setOpen(false);
       }
     }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [open]);
 
@@ -89,8 +97,14 @@ export function TimePicker({
         />
       </button>
 
-      {open && (
-        <div className="absolute left-0 z-50 mt-1.5 w-[248px] rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-3 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none">
+      <FloatingPanel
+        open={open}
+        anchorRef={containerRef}
+        panelRef={panelRef}
+        align={align}
+        fixedWidth={248}
+        className="rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-3 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none max-h-[calc(100dvh-16px)] overflow-y-auto"
+      >
           <div className="mb-2">
             <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">
               Horários Acadêmicos Rápidos
@@ -167,8 +181,7 @@ export function TimePicker({
               </div>
             </div>
           </div>
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }

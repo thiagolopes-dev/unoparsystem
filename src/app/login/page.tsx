@@ -1,10 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { loginAction, requestPasswordResetAction } from "@/app/actions";
+import {
+  loginAction,
+  requestPasswordResetAction,
+  verifyRecoveryCodeAction,
+} from "@/app/actions";
 import {
   Lock,
   Mail,
+  KeyRound,
   ArrowRight,
   ArrowLeft,
   AlertCircle,
@@ -150,19 +155,22 @@ function OrbitalBackdrop() {
 }
 
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "forgot">("login");
+  const [mode, setMode] = useState<"login" | "forgot" | "verify-code">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [pointerPos, setPointerPos] = useState({ x: 200, y: 120, active: false });
 
-  function switchMode(nextMode: "login" | "forgot") {
+  function switchMode(nextMode: "login" | "forgot" | "verify-code") {
     setMode(nextMode);
     setError(null);
-    setSuccessMessage(null);
+    if (nextMode === "login") {
+      setSuccessMessage(null);
+    }
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -177,12 +185,20 @@ export default function LoginPage() {
         if (res.ok) {
           setSuccessMessage(
             res.message ??
-              "Se o e-mail informado estiver cadastrado, você receberá um link para redefinir sua senha em instantes."
+              "Se o e-mail informado estiver cadastrado, você receberá um link (e um código de 6 dígitos) para redefinir sua senha em instantes."
           );
         } else {
           setError(
             res.error ?? "Não foi possível enviar o link de recuperação."
           );
+        }
+        return;
+      }
+
+      if (mode === "verify-code") {
+        const res = await verifyRecoveryCodeAction(formData);
+        if (res && !res.ok) {
+          setError(res.error ?? "Código inválido ou expirado.");
         }
         return;
       }
@@ -251,14 +267,17 @@ export default function LoginPage() {
               className="relative z-10 mb-7 h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent"
             />
 
-            {mode === "forgot" && (
+            {(mode === "forgot" || mode === "verify-code") && (
               <div className="relative z-10 mb-5">
                 <h2 className="text-base font-semibold tracking-tight text-white">
-                  Recuperar acesso
+                  {mode === "verify-code"
+                    ? "Validar código de recuperação"
+                    : "Recuperar acesso"}
                 </h2>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                  Informe seu e-mail institucional para receber um link seguro de
-                  redefinição de senha.
+                  {mode === "verify-code"
+                    ? "Digite o código de 6 dígitos recebido no e-mail para ir direto à tela de criação da nova senha."
+                    : "Informe seu e-mail institucional para receber um link seguro (ou código de 6 dígitos) de redefinição de senha."}
                 </p>
               </div>
             )}
@@ -356,6 +375,35 @@ export default function LoginPage() {
                 </div>
               )}
 
+              {mode === "verify-code" && (
+                <div>
+                  <label
+                    htmlFor="code"
+                    className="block text-xs font-medium tracking-wide text-slate-300 mb-1.5"
+                  >
+                    Código de 6 dígitos
+                  </label>
+                  <div className="relative group">
+                    <KeyRound className="h-4 w-4 text-slate-400 group-focus-within:text-cyan-300 transition-colors duration-200 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      id="code"
+                      name="code"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={8}
+                      required
+                      autoComplete="one-time-code"
+                      value={recoveryCode}
+                      onChange={(e) =>
+                        setRecoveryCode(e.target.value.replace(/\D/g, ""))
+                      }
+                      placeholder="Ex: 440681"
+                      className="login-glass-input w-full rounded-xl border border-white/15 bg-white/[0.05] pl-10 pr-3.5 py-3 text-sm font-mono tracking-widest text-white placeholder:text-slate-400/70 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.07] focus:bg-white/[0.09] focus:border-cyan-400/60 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.14)] focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={isPending}
@@ -393,6 +441,8 @@ export default function LoginPage() {
                     <span className="relative">
                       {mode === "forgot"
                         ? "Enviando link..."
+                        : mode === "verify-code"
+                        ? "Validando código..."
                         : "Autenticando..."}
                     </span>
                   </>
@@ -401,6 +451,8 @@ export default function LoginPage() {
                     <span className="relative">
                       {mode === "forgot"
                         ? "Enviar link de recuperação"
+                        : mode === "verify-code"
+                        ? "Validar código e redefinir senha"
                         : "Entrar no Sistema"}
                     </span>
                     <ArrowRight className="relative h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
@@ -409,6 +461,18 @@ export default function LoginPage() {
               </button>
 
               {mode === "forgot" && (
+                <button
+                  type="button"
+                  onClick={() => switchMode("verify-code")}
+                  disabled={isPending}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-400/25 bg-cyan-400/[0.06] px-4 py-2.5 text-xs font-medium text-cyan-200 hover:bg-cyan-400/[0.14] hover:text-white disabled:opacity-60 transition-all cursor-pointer"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Já tenho o código de 6 dígitos</span>
+                </button>
+              )}
+
+              {(mode === "forgot" || mode === "verify-code") && (
                 <button
                   type="button"
                   onClick={() => switchMode("login")}

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useId, useMemo } from "react";
 import { Check, ChevronDown, Search, X } from "lucide-react";
+import { FloatingPanel } from "@/components/ui/floating-panel";
 
 export interface SelectOption {
   value: string;
@@ -44,6 +45,7 @@ export function Select({
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
 
@@ -80,15 +82,17 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
       ) {
         setOpen(false);
       }
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        e.stopPropagation();
         setOpen(false);
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -109,10 +113,10 @@ export function Select({
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [open, filteredOptions, highlightedIndex, onChange]);
 
@@ -168,14 +172,17 @@ export function Select({
         />
       </button>
 
-      {open && (
-        <div
-          id={listboxId}
-          role="listbox"
-          className={`absolute z-50 mt-1.5 min-w-[220px] w-full rounded-xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-1.5 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 ${
-            align === "right" ? "right-0" : "left-0"
-          }`}
-        >
+      <FloatingPanel
+        open={open}
+        anchorRef={containerRef}
+        panelRef={panelRef}
+        align={align}
+        matchAnchorWidth
+        minWidth={220}
+        id={listboxId}
+        role="listbox"
+        className="rounded-xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-1.5 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5"
+      >
           {showSearch && (
             <div className="relative mb-1.5 px-1 pt-0.5">
               <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -272,8 +279,7 @@ export function Select({
               })
             )}
           </div>
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }

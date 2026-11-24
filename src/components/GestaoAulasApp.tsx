@@ -12,15 +12,26 @@ import {
   createTurmaAction,
   updateTurmaAction,
   deleteTurmaAction,
-  createProfessorAction,
-  updateProfessorAction,
-  deleteProfessorAction,
+  createUsuarioAction,
+  updateUsuarioAction,
+  deleteUsuarioAction,
+  createTermoUsoAction,
+  updateTermoUsoAction,
+  activateTermoUsoAction,
+  deleteTermoUsoAction,
   logoutAction,
 } from "@/app/actions";
 import {
+  ALL_USER_ROLES,
+  buildGoogleMapsDirectionsUrl,
+  buildGoogleMapsEmbedUrl,
+  buildGoogleMapsPinUrl,
   canManageCatalog,
   canUpdateAula,
+  canViewAcademicCatalog,
   formatPhoneBr,
+  hasRole,
+  ROLE_LABELS,
   STATUS_LABELS,
   TURNO_LABELS,
 } from "@/domain/gestao-aulas";
@@ -33,11 +44,13 @@ import type {
 import { Select, type SelectOption } from "@/components/ui/select";
 import { DatePicker, formatIsoDatePtBr } from "@/components/ui/date-picker";
 import { Dialog } from "@/components/ui/dialog";
+import { FirstAccessOnboardingModal } from "@/components/FirstAccessOnboardingModal";
+import { RateLimitAdminPanel } from "@/components/RateLimitAdminPanel";
 import {
   BookOpen,
   BookOpenCheck,
   Calendar,
-  GraduationCap,
+  FileText,
   Layers,
   LogOut,
   Plus,
@@ -51,6 +64,16 @@ import {
   Search,
   RotateCcw,
   X,
+  Eye,
+  EyeOff,
+  Check,
+  Lock,
+  KeyRound,
+  Map as MapIcon,
+  Navigation,
+  ExternalLink,
+  Copy,
+  SlidersHorizontal,
 } from "lucide-react";
 
 function formatAulaPeriod(dataInicio: string, dataFim?: string | null): string {
@@ -61,9 +84,29 @@ function formatAulaPeriod(dataInicio: string, dataFim?: string | null): string {
   return `${inicioLabel} até ${formatIsoDatePtBr(dataFim)}`;
 }
 
+function formatDateTimePtBr(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
 type DisciplinaRow = Database["public"]["Tables"]["disciplinas"]["Row"];
 type TurmaRow = Database["public"]["Tables"]["turmas"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+type TermoUsoRow = Database["public"]["Tables"]["termos_uso"]["Row"];
+type TermoAceiteRow = Database["public"]["Tables"]["termos_aceites"]["Row"];
+type RateLimitConfigRow =
+  Database["public"]["Tables"]["rate_limit_config"]["Row"];
+type RateLimitStateRow =
+  Database["public"]["Tables"]["rate_limit_state"]["Row"];
+type RateLimitAuditRow =
+  Database["public"]["Tables"]["rate_limit_audit"]["Row"];
 type AulaRow = Database["public"]["Tables"]["aulas"]["Row"];
 
 export interface AulaEnriched extends AulaRow {
@@ -81,14 +124,46 @@ interface GestaoAulasAppProps {
     nome: string;
     email: string;
     role: UserRole;
+    roles: UserRole[];
+    mustChangePassword: boolean;
   };
   disciplinas: DisciplinaRow[];
   turmas: TurmaRow[];
   professores: ProfessorRow[];
+  usuarios: ProfileRow[];
+  termosUso: TermoUsoRow[];
+  termosAceites: TermoAceiteRow[];
+  rateLimitConfig: RateLimitConfigRow | null;
+  rateLimitStates: RateLimitStateRow[];
+  rateLimitAudits: RateLimitAuditRow[];
+  onboarding: {
+    activeTermo: TermoUsoRow | null;
+    needsAcceptTerms: boolean;
+    needsChangePassword: boolean;
+  };
   aulas: AulaEnriched[];
 }
 
-type ActiveTab = "aulas" | "disciplinas" | "turmas" | "professores";
+type ActiveTab =
+  | "aulas"
+  | "disciplinas"
+  | "turmas"
+  | "usuarios"
+  | "termos"
+  | "parametros";
+
+const ROLE_BADGE_STYLES: Record<UserRole, string> = {
+  ADMIN: "bg-cyan-400/15 text-cyan-200 border-cyan-400/30",
+  PROFESSOR: "bg-indigo-400/15 text-indigo-200 border-indigo-400/30",
+  ALUNO: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30",
+};
+
+const ROLE_CHECKBOX_DESCRIPTIONS: Record<UserRole, string> = {
+  ADMIN: "Acesso total a todas as abas, cadastros, edições e exclusões.",
+  PROFESSOR:
+    "Visualiza Grade, Disciplinas e Turmas (somente leitura) e fica disponível na alocação de aulas.",
+  ALUNO: "Visualiza exclusivamente a Grade de Aulas (somente leitura).",
+};
 
 const STATUS_BADGE_STYLES: Record<
   AulaStatus,
@@ -147,7 +222,7 @@ const GLASS_CANCEL_BTN_CLASS =
 const GLASS_PRIMARY_BTN_CLASS =
   "h-9 inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-4 text-xs font-semibold text-slate-950 shadow-[0_4px_20px_-4px_rgba(34,211,238,0.45)] hover:brightness-105 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer";
 
-type DeleteEntityKind = "aula" | "disciplina" | "turma" | "professor";
+type DeleteEntityKind = "aula" | "disciplina" | "turma" | "usuario" | "termo";
 
 const DELETE_DIALOG_META: Record<
   DeleteEntityKind,
@@ -168,10 +243,15 @@ const DELETE_DIALOG_META: Record<
     description:
       "Esta ação removerá permanentemente a turma cadastrada do sistema.",
   },
-  professor: {
-    title: "Excluir Professor(a)",
+  usuario: {
+    title: "Excluir Usuário",
     description:
-      "Esta ação removerá permanentemente o registro docente do sistema.",
+      "Esta ação removerá permanentemente o usuário e seu acesso ao sistema.",
+  },
+  termo: {
+    title: "Excluir Termo de Uso",
+    description:
+      "Esta ação removerá permanentemente esta versão do termo de uso.",
   },
 };
 
@@ -230,6 +310,13 @@ export function GestaoAulasApp({
   disciplinas,
   turmas,
   professores,
+  usuarios,
+  termosUso,
+  termosAceites,
+  rateLimitConfig,
+  rateLimitStates,
+  rateLimitAudits,
+  onboarding,
   aulas,
 }: GestaoAulasAppProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("aulas");
@@ -251,13 +338,16 @@ export function GestaoAulasApp({
     return () => window.clearTimeout(timer);
   }, [feedback?.id]);
 
-  // Controle de Modais de Criação e Edição (shadcn Dialog pattern)
+  // Controle de Modais de Criação e Edição
   const [openModal, setOpenModal] = useState<ActiveTab | null>(null);
   const [editingDisciplina, setEditingDisciplina] =
     useState<DisciplinaRow | null>(null);
   const [editingTurma, setEditingTurma] = useState<TurmaRow | null>(null);
-  const [editingProfessor, setEditingProfessor] =
-    useState<ProfessorRow | null>(null);
+  const [editingUsuario, setEditingUsuario] = useState<ProfileRow | null>(null);
+  const [editingTermo, setEditingTermo] = useState<TermoUsoRow | null>(null);
+  const [viewingAceiteMap, setViewingAceiteMap] =
+    useState<TermoAceiteRow | null>(null);
+  const [copiedCoords, setCopiedCoords] = useState(false);
   const [editingAula, setEditingAula] = useState<AulaEnriched | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
     kind: DeleteEntityKind;
@@ -267,6 +357,12 @@ export function GestaoAulasApp({
     badge?: string;
   } | null>(null);
 
+  // Permissões RBAC derivadas dos perfis marcados (checkboxes)
+  const isAdmin = canManageCatalog(currentUser.roles);
+  const isProfessor = hasRole(currentUser.roles, "PROFESSOR");
+  const canViewCatalogTabs = canViewAcademicCatalog(currentUser.roles);
+  const isAlunoOnly = !isAdmin && !isProfessor;
+
   // Filtros da Grade de Aulas
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [filterDate, setFilterDate] = useState<string>("");
@@ -274,13 +370,17 @@ export function GestaoAulasApp({
   const [filterTurmaId, setFilterTurmaId] = useState<string>("TODAS");
   const [filterProfId, setFilterProfId] = useState<string>("TODOS");
   const [onlyMyClasses, setOnlyMyClasses] = useState<boolean>(
-    currentUser.role === "PROFESSOR"
+    !isAdmin && isProfessor
   );
 
-  // Estado dos selects e máscara em modais de Turma e Professor
+  // Estado dos formulários de Turma, Usuário e Termo de Uso
   const [draftTurno, setDraftTurno] = useState<string>("NOTURNO");
+  const [draftUsuarioRole, setDraftUsuarioRole] = useState<UserRole>("ALUNO");
   const [draftTitulacao, setDraftTitulacao] = useState<string>("Mestre");
   const [draftTelefone, setDraftTelefone] = useState<string>("");
+  const [showUserPassword, setShowUserPassword] = useState(false);
+  const [showUserConfirmPassword, setShowUserConfirmPassword] = useState(false);
+  const [draftTermoAtivo, setDraftTermoAtivo] = useState<boolean>(true);
 
   // Estado do formulário de Nova Aula para pré-validação de período
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -296,7 +396,37 @@ export function GestaoAulasApp({
     observacoes: "",
   });
 
-  const isAdmin = canManageCatalog(currentUser.role);
+  const userById = useMemo(
+    () => new Map(usuarios.map((u) => [u.id, u])),
+    [usuarios]
+  );
+
+  const termoById = useMemo(
+    () => new Map(termosUso.map((t) => [t.id, t])),
+    [termosUso]
+  );
+
+  const activeTermoId = useMemo(
+    () => termosUso.find((t) => t.ativo)?.id ?? null,
+    [termosUso]
+  );
+
+  const acceptedActiveUserIds = useMemo(() => {
+    if (!activeTermoId) return new Set<string>();
+    return new Set(
+      termosAceites
+        .filter((a) => a.termo_id === activeTermoId)
+        .map((a) => a.user_id)
+    );
+  }, [termosAceites, activeTermoId]);
+
+  const aceitesCountByTermo = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of termosAceites) {
+      counts.set(a.termo_id, (counts.get(a.termo_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [termosAceites]);
 
   // Opções formatadas para os Custom Selects (padrão shadcn/ui)
   const disciplinaOptions = useMemo<SelectOption[]>(
@@ -364,8 +494,11 @@ export function GestaoAulasApp({
   function handleOpenCreate(tab: ActiveTab) {
     setEditingDisciplina(null);
     setEditingTurma(null);
-    setEditingProfessor(null);
+    setEditingUsuario(null);
+    setEditingTermo(null);
     setEditingAula(null);
+    setShowUserPassword(false);
+    setShowUserConfirmPassword(false);
     if (tab === "aulas") {
       setDraftAula({
         disciplina_id: disciplinas[0]?.id ?? "",
@@ -380,9 +513,12 @@ export function GestaoAulasApp({
       });
     } else if (tab === "turmas") {
       setDraftTurno("NOTURNO");
-    } else if (tab === "professores") {
+    } else if (tab === "usuarios") {
+      setDraftUsuarioRole("ALUNO");
       setDraftTitulacao("Mestre");
       setDraftTelefone("");
+    } else if (tab === "termos") {
+      setDraftTermoAtivo(true);
     }
     setOpenModal(tab);
   }
@@ -398,11 +534,20 @@ export function GestaoAulasApp({
     setOpenModal("turmas");
   }
 
-  function handleEditProfessor(p: ProfessorRow) {
-    setEditingProfessor(p);
-    setDraftTitulacao(p.titulacao);
-    setDraftTelefone(formatPhoneBr(p.telefone ?? ""));
-    setOpenModal("professores");
+  function handleEditUsuario(u: ProfileRow) {
+    setEditingUsuario(u);
+    setDraftUsuarioRole(u.role);
+    setDraftTitulacao(u.titulacao || "Mestre");
+    setDraftTelefone(formatPhoneBr(u.telefone ?? ""));
+    setShowUserPassword(false);
+    setShowUserConfirmPassword(false);
+    setOpenModal("usuarios");
+  }
+
+  function handleEditTermo(t: TermoUsoRow) {
+    setEditingTermo(t);
+    setDraftTermoAtivo(t.ativo);
+    setOpenModal("termos");
   }
 
   function handleEditAula(a: AulaEnriched) {
@@ -425,9 +570,12 @@ export function GestaoAulasApp({
     setOpenModal(null);
     setEditingDisciplina(null);
     setEditingTurma(null);
-    setEditingProfessor(null);
+    setEditingUsuario(null);
+    setEditingTermo(null);
     setEditingAula(null);
     setDraftTelefone("");
+    setShowUserPassword(false);
+    setShowUserConfirmPassword(false);
   }
 
   // Validação instantânea do período de datas no cliente
@@ -554,7 +702,8 @@ export function GestaoAulasApp({
       aula: deleteAulaAction,
       disciplina: deleteDisciplinaAction,
       turma: deleteTurmaAction,
-      professor: deleteProfessorAction,
+      usuario: deleteUsuarioAction,
+      termo: deleteTermoUsoAction,
     };
 
     runAction(
@@ -570,12 +719,89 @@ export function GestaoAulasApp({
     );
   }
 
-  const ctaButtonLabel: Record<ActiveTab, string> = {
+  const activeBlockedCount = useMemo(() => {
+    const now = Date.now();
+    return rateLimitStates.filter(
+      (s) => s.blocked_until && new Date(s.blocked_until).getTime() > now
+    ).length;
+  }, [rateLimitStates]);
+
+  const ctaButtonLabel: Partial<Record<ActiveTab, string>> = {
     aulas: "Agendar Aula",
     disciplinas: "Nova Disciplina",
     turmas: "Nova Turma",
-    professores: "Novo Professor",
+    usuarios: "Novo Usuário",
+    termos: "Novo Termo",
   };
+
+  const visibleTabs = useMemo(() => {
+    const tabs: {
+      id: ActiveTab;
+      label: string;
+      count: number;
+      icon: typeof Calendar;
+      alert?: boolean;
+    }[] = [
+      {
+        id: "aulas",
+        label: "Grade de Aulas",
+        count: aulas.length,
+        icon: Calendar,
+      },
+    ];
+
+    if (canViewCatalogTabs) {
+      tabs.push(
+        {
+          id: "disciplinas",
+          label: "Disciplinas",
+          count: disciplinas.length,
+          icon: BookOpen,
+        },
+        {
+          id: "turmas",
+          label: "Turmas",
+          count: turmas.length,
+          icon: Layers,
+        }
+      );
+    }
+
+    if (isAdmin) {
+      tabs.push(
+        {
+          id: "usuarios",
+          label: "Usuários",
+          count: usuarios.length,
+          icon: Users,
+        },
+        {
+          id: "termos",
+          label: "Termos de Uso",
+          count: termosUso.length,
+          icon: FileText,
+        },
+        {
+          id: "parametros",
+          label: "Parâmetros",
+          count: activeBlockedCount,
+          icon: SlidersHorizontal,
+          alert: activeBlockedCount > 0,
+        }
+      );
+    }
+
+    return tabs;
+  }, [
+    activeBlockedCount,
+    aulas.length,
+    canViewCatalogTabs,
+    disciplinas.length,
+    isAdmin,
+    termosUso.length,
+    turmas.length,
+    usuarios.length,
+  ]);
 
   return (
     <div className="relative min-h-screen flex flex-col bg-[#060913] text-slate-100 antialiased">
@@ -612,19 +838,18 @@ export function GestaoAulasApp({
 
           <div className="flex items-center gap-3">
             <div className="text-right hidden md:block">
-              <div className="flex items-center justify-end gap-1.5">
+              <div className="flex items-center justify-end gap-1.5 flex-wrap">
                 <span className="text-xs font-medium text-slate-100">
                   {currentUser.nome}
                 </span>
-                <span
-                  className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded border ${
-                    isAdmin
-                      ? "bg-cyan-400/15 text-cyan-200 border-cyan-400/30"
-                      : "bg-white/[0.08] text-slate-300 border-white/10"
-                  }`}
-                >
-                  {currentUser.role}
-                </span>
+                {currentUser.roles.map((r) => (
+                  <span
+                    key={r}
+                    className={`font-mono text-[10px] uppercase px-1.5 py-0.5 rounded border ${ROLE_BADGE_STYLES[r]}`}
+                  >
+                    {ROLE_LABELS[r]}
+                  </span>
+                ))}
               </div>
               <span className="text-[11px] font-mono text-slate-400 block">
                 {currentUser.email}
@@ -644,88 +869,68 @@ export function GestaoAulasApp({
           </div>
         </div>
 
-        {/* Navigation Tabs + Primary Action Button */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between gap-4 border-t border-white/[0.07]">
-          <div className="flex items-center gap-1 overflow-x-auto">
-            {[
-              {
-                id: "aulas" as const,
-                label: "Grade de Aulas",
-                count: aulas.length,
-                icon: Calendar,
-              },
-              {
-                id: "disciplinas" as const,
-                label: "Disciplinas",
-                count: disciplinas.length,
-                icon: BookOpen,
-              },
-              {
-                id: "turmas" as const,
-                label: "Turmas",
-                count: turmas.length,
-                icon: Layers,
-              },
-              {
-                id: "professores" as const,
-                label: "Professores",
-                count: professores.length,
-                icon: GraduationCap,
-              },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    setFeedback(null);
-                  }}
-                  className={`flex items-center gap-2 px-3.5 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
-                    active
-                      ? "border-cyan-400 text-white"
-                      : "border-transparent text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Icon
-                    className={`h-3.5 w-3.5 ${
-                      active ? "text-cyan-300" : "text-slate-400"
-                    }`}
-                  />
-                  <span>{tab.label}</span>
-                  <span
-                    className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md border ${
+        {/* Navigation Tabs + Primary Action Button (oculta para Aluno, que visualiza apenas a Grade) */}
+        {!isAlunoOnly && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between gap-4 border-t border-white/[0.07]">
+            <div className="flex items-center gap-1 overflow-x-auto">
+              {visibleTabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      setFeedback(null);
+                    }}
+                    className={`flex items-center gap-2 px-3.5 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                       active
-                        ? "bg-cyan-400/20 text-cyan-200 border-cyan-400/30"
-                        : "bg-white/[0.06] text-slate-400 border-transparent"
+                        ? "border-cyan-400 text-white"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    {tab.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                    <Icon
+                      className={`h-3.5 w-3.5 ${
+                        active ? "text-cyan-300" : "text-slate-400"
+                      }`}
+                    />
+                    <span>{tab.label}</span>
+                    <span
+                      className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md border ${
+                        tab.alert
+                          ? "bg-rose-500/20 text-rose-200 border-rose-400/40"
+                          : active
+                          ? "bg-cyan-400/20 text-cyan-200 border-cyan-400/30"
+                          : "bg-white/[0.06] text-slate-400 border-transparent"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => handleOpenCreate(activeTab)}
-              className="my-1.5 h-8 inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-3 text-xs font-semibold text-slate-950 shadow-[0_4px_20px_-4px_rgba(34,211,238,0.45)] hover:brightness-105 transition-all cursor-pointer shrink-0"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>{ctaButtonLabel[activeTab]}</span>
-            </button>
-          )}
-        </div>
+            {isAdmin && ctaButtonLabel[activeTab] && (
+              <button
+                type="button"
+                onClick={() => handleOpenCreate(activeTab)}
+                className="my-1.5 h-8 inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-3 text-xs font-semibold text-slate-950 shadow-[0_4px_20px_-4px_rgba(34,211,238,0.45)] hover:brightness-105 transition-all cursor-pointer shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{ctaButtonLabel[activeTab]}</span>
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
       <main className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 flex-1 space-y-5">
-        {/* Compact KPI Strip */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Compact KPI Strip (exibido somente na aba Grade de Aulas) */}
+        {activeTab === "aulas" && (
+          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <button
             type="button"
             onClick={() => {
@@ -818,19 +1023,28 @@ export function GestaoAulasApp({
             </p>
           </button>
         </section>
+        )}
 
-        {/* RBAC Notice Banner for Professor */}
+        {/* RBAC Notice Banner para perfis somente leitura (Professor / Aluno) */}
         {!isAdmin && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] backdrop-blur-xl px-4 py-3 text-xs text-slate-300">
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-cyan-300 shrink-0" />
-              <span>
-                Modo <strong className="text-white">Professor</strong> ativo: você pode consultar toda a
-                grade e atualizar o <strong className="text-white">Status da Aula</strong> das aulas alocadas ao seu perfil.
-              </span>
+              {isProfessor ? (
+                <span>
+                  Modo <strong className="text-white">Professor</strong> ativo:
+                  visualização completa da Grade de Aulas, Disciplinas e Turmas
+                  (somente leitura).
+                </span>
+              ) : (
+                <span>
+                  Modo <strong className="text-white">Aluno</strong> ativo:
+                  visualização exclusiva da Grade de Aulas.
+                </span>
+              )}
             </div>
             <span className="font-mono text-[11px] text-cyan-300/70 shrink-0 hidden sm:inline">
-              RLS: aulas_update_admin_or_assigned_professor
+              Somente Leitura
             </span>
           </div>
         )}
@@ -915,7 +1129,7 @@ export function GestaoAulasApp({
                 </div>
               </div>
 
-              {currentUser.role === "PROFESSOR" && (
+              {isProfessor && !isAdmin && (
                 <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between">
                   <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                     <input
@@ -969,9 +1183,8 @@ export function GestaoAulasApp({
               <div className="space-y-2.5">
                 {filteredAulas.map((aula) => {
                   const userCanEditStatus = canUpdateAula({
-                    userRole: currentUser.role,
+                    userRoles: currentUser.roles,
                     userId: currentUser.id,
-                    aulaProfessorUserId: aula.professor?.user_id,
                   });
                   const badgeStyle = STATUS_BADGE_STYLES[aula.status];
 
@@ -1154,7 +1367,7 @@ export function GestaoAulasApp({
         {/* ===================================================================
             TAB 2: DISCIPLINAS (TABELA GLASS COMPACTA)
            =================================================================== */}
-        {activeTab === "disciplinas" && (
+        {activeTab === "disciplinas" && canViewCatalogTabs && (
           <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -1250,7 +1463,7 @@ export function GestaoAulasApp({
         {/* ===================================================================
             TAB 3: TURMAS (TABELA GLASS COMPACTA)
            =================================================================== */}
-        {activeTab === "turmas" && (
+        {activeTab === "turmas" && canViewCatalogTabs && (
           <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -1347,17 +1560,18 @@ export function GestaoAulasApp({
         )}
 
         {/* ===================================================================
-            TAB 4: PROFESSORES (TABELA GLASS COMPACTA)
+            TAB 4: USUÁRIOS (GESTÃO UNIFICADA MULTI-PERFIL — APENAS ADMIN)
            =================================================================== */}
-        {activeTab === "professores" && (
+        {activeTab === "usuarios" && isAdmin && (
           <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <h2 className="text-xs font-semibold text-white">
-                  Corpo Docente
+                  Usuários do Sistema
                 </h2>
                 <span className="text-[11px] text-slate-400 hidden sm:inline">
-                  · Lista de professores e status de acesso ao sistema
+                  · Perfis via checkbox (Admin, Professor, Aluno), titulação
+                  docente e status de primeiro acesso
                 </span>
               </div>
             </div>
@@ -1366,57 +1580,222 @@ export function GestaoAulasApp({
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                    <th className="py-2.5 px-4">Docente</th>
+                    <th className="py-2.5 px-4">Usuário</th>
+                    <th className="py-2.5 px-4">Perfis</th>
                     <th className="py-2.5 px-4 w-36">Titulação</th>
-                    <th className="py-2.5 px-4">Contato</th>
-                    <th className="py-2.5 px-4 w-36">Acesso ao Sistema</th>
-                    {isAdmin && (
-                      <th className="py-2.5 px-4 w-20 text-right">Ações</th>
-                    )}
+                    <th className="py-2.5 px-4 w-52">Primeiro Acesso / Termo</th>
+                    <th className="py-2.5 px-4 w-20 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.06] text-xs">
-                  {professores.map((p) => (
-                    <tr
-                      key={p.id}
-                      className="h-10 hover:bg-white/[0.04] transition-colors"
-                    >
-                      <td className="py-2 px-4 font-medium text-slate-100 whitespace-nowrap">
-                        {p.nome}
-                      </td>
-                      <td className="py-2 px-4 text-slate-300 whitespace-nowrap">
-                        {p.titulacao}
-                      </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
-                        <span className="text-slate-200">{p.email}</span>
-                        {p.telefone && (
-                          <span className="text-slate-400 font-mono text-[11px] ml-2">
-                            · {formatPhoneBr(p.telefone)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
-                        {p.user_id ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-200 bg-emerald-400/12 border border-emerald-400/30 px-2 py-0.5 rounded-full">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-                            Acesso Ativo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400 bg-white/[0.06] border border-white/10 px-2 py-0.5 rounded-full">
-                            <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
-                            Sem Acesso
-                          </span>
-                        )}
-                      </td>
-                      {isAdmin && (
+                  {usuarios.map((u) => {
+                    const userRoles = u.roles?.length ? u.roles : [u.role];
+                    const isSelf = u.id === currentUser.id;
+                    const acceptedTerm = acceptedActiveUserIds.has(u.id);
+                    return (
+                      <tr
+                        key={u.id}
+                        className="h-12 hover:bg-white/[0.04] transition-colors"
+                      >
+                        <td className="py-2 px-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-slate-100">
+                              {u.nome}
+                            </span>
+                            {isSelf && (
+                              <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded bg-white/10 text-slate-300 border border-white/10">
+                                Você
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            <span>{u.email}</span>
+                            {u.telefone && (
+                              <span className="font-mono ml-2">
+                                · {formatPhoneBr(u.telefone)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-4 whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1">
+                            {userRoles.map((r) => (
+                              <span
+                                key={r}
+                                className={`font-mono text-[10px] uppercase px-2 py-0.5 rounded-md border ${ROLE_BADGE_STYLES[r]}`}
+                              >
+                                {ROLE_LABELS[r]}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-2 px-4 text-slate-300 whitespace-nowrap">
+                          {userRoles.includes("PROFESSOR") && u.titulacao
+                            ? u.titulacao
+                            : "—"}
+                        </td>
+                        <td className="py-2 px-4 whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {u.must_change_password ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-200 bg-amber-400/12 border border-amber-400/30 px-2 py-0.5 rounded-full">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                                1º Acesso Pendente
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-200 bg-emerald-400/12 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                Senha Definida
+                              </span>
+                            )}
+                            {activeTermoId && (
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                                  acceptedTerm
+                                    ? "text-cyan-200 bg-cyan-400/12 border-cyan-400/30"
+                                    : "text-slate-400 bg-white/[0.05] border-white/10"
+                                }`}
+                              >
+                                {acceptedTerm
+                                  ? "Termo Aceito"
+                                  : "Termo Pendente"}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2 px-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center justify-end gap-1">
                             <button
                               type="button"
                               disabled={isPending}
-                              title="Editar professor"
-                              aria-label="Editar professor"
-                              onClick={() => handleEditProfessor(p)}
+                              title="Editar usuário"
+                              aria-label="Editar usuário"
+                              onClick={() => handleEditUsuario(u)}
+                              className="p-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] transition-colors cursor-pointer"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isPending || isSelf}
+                              title={
+                                isSelf
+                                  ? "Você não pode excluir sua própria conta"
+                                  : "Excluir usuário"
+                              }
+                              aria-label="Excluir usuário"
+                              onClick={() =>
+                                setPendingDelete({
+                                  kind: "usuario",
+                                  id: u.id,
+                                  badge: userRoles
+                                    .map((r) => ROLE_LABELS[r])
+                                    .join(" · "),
+                                  title: u.nome,
+                                  subtitle: u.email,
+                                })
+                              }
+                              className="p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* ===================================================================
+            TAB 5: TERMOS DE USO & AUDITORIA DE ACEITES (APENAS ADMIN)
+           =================================================================== */}
+        {activeTab === "termos" && isAdmin && (
+          <div className="space-y-4">
+            <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-xs font-semibold text-white">
+                    Termos de Uso Cadastrados
+                  </h2>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    · O termo vigente é exibido obrigatoriamente no 1º acesso de
+                    cada usuário
+                  </span>
+                </div>
+              </div>
+
+              {termosUso.length === 0 ? (
+                <div className="p-10 text-center">
+                  <FileText className="h-8 w-8 text-cyan-300/40 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-100">
+                    Nenhum termo de uso cadastrado.
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Cadastre um termo vigente para exigir confirmação e captura
+                    de geolocalização no primeiro acesso.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-white/[0.06]">
+                  {termosUso.map((termo) => {
+                    const totalAceites = aceitesCountByTermo.get(termo.id) ?? 0;
+                    return (
+                      <article
+                        key={termo.id}
+                        className="p-4 sm:p-5 hover:bg-white/[0.02] transition-colors"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-400/15 text-cyan-200 border border-cyan-400/25">
+                                v{termo.versao}
+                              </span>
+                              <h3 className="text-sm font-semibold text-white">
+                                {termo.titulo}
+                              </h3>
+                              {termo.ativo ? (
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-200 bg-emerald-400/12 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                                  Vigente
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400 bg-white/[0.05] border border-white/10 px-2 py-0.5 rounded-full">
+                                  Inativo
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] font-mono text-slate-400">
+                              Criado em {formatDateTimePtBr(termo.created_at)} ·{" "}
+                              {totalAceites} aceite(s) registrado(s)
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {!termo.ativo && (
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() =>
+                                  runAction(
+                                    () => activateTermoUsoAction(termo.id),
+                                    undefined,
+                                    "Termo ativado"
+                                  )
+                                }
+                                className="h-8 px-2.5 rounded-lg border border-emerald-400/30 bg-emerald-400/10 text-[11px] font-medium text-emerald-200 hover:bg-emerald-400/20 transition-colors cursor-pointer"
+                              >
+                                Definir Vigente
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              title="Editar termo"
+                              aria-label="Editar termo"
+                              onClick={() => handleEditTermo(termo)}
                               className="p-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-white/[0.08] transition-colors cursor-pointer"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -1424,15 +1803,15 @@ export function GestaoAulasApp({
                             <button
                               type="button"
                               disabled={isPending}
-                              title="Excluir professor"
-                              aria-label="Excluir professor"
+                              title="Excluir termo"
+                              aria-label="Excluir termo"
                               onClick={() =>
                                 setPendingDelete({
-                                  kind: "professor",
-                                  id: p.id,
-                                  badge: p.titulacao,
-                                  title: p.nome,
-                                  subtitle: p.email,
+                                  kind: "termo",
+                                  id: termo.id,
+                                  badge: `v${termo.versao}`,
+                                  title: termo.titulo,
+                                  subtitle: `${totalAceites} aceite(s) vinculado(s)`,
                                 })
                               }
                               className="p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors cursor-pointer"
@@ -1440,14 +1819,136 @@ export function GestaoAulasApp({
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                        </div>
+
+                        <div className="mt-3 rounded-xl border border-white/[0.07] bg-[#060b18]/65 p-3 text-xs text-slate-300 whitespace-pre-wrap max-h-36 overflow-y-auto leading-relaxed">
+                          {termo.conteudo}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Auditoria de Aceites com Latitude e Longitude */}
+            <section className="bg-[#0b1224]/65 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-xs font-semibold text-white">
+                    Registro de Aceites & Geolocalização
+                  </h2>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    · Auditoria com data/hora, latitude e longitude capturadas
+                    no aceite
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] text-cyan-300">
+                  {termosAceites.length} registro(s)
+                </span>
+              </div>
+
+              {termosAceites.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Nenhum aceite registrado até o momento.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                        <th className="py-2.5 px-4">Usuário</th>
+                        <th className="py-2.5 px-4 w-28">Termo</th>
+                        <th className="py-2.5 px-4 w-40">Data / Hora</th>
+                        <th className="py-2.5 px-4">Geolocalização (Lat / Lng)</th>
+                        <th className="py-2.5 px-4 w-56 text-right">
+                          Mapa & Rota
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.06] text-xs">
+                      {termosAceites.map((aceite) => {
+                        const u = userById.get(aceite.user_id);
+                        const t = termoById.get(aceite.termo_id);
+                        const routeUrl = buildGoogleMapsDirectionsUrl(
+                          aceite.latitude,
+                          aceite.longitude
+                        );
+                        return (
+                          <tr
+                            key={aceite.id}
+                            className="h-12 hover:bg-white/[0.04] transition-colors"
+                          >
+                            <td className="py-2 px-4 whitespace-nowrap">
+                              <span className="font-medium text-slate-100 block">
+                                {u?.nome ?? "Usuário"}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {u?.email ?? aceite.user_id}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4 whitespace-nowrap">
+                              <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-200 border border-cyan-400/25">
+                                v{t?.versao ?? "—"}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                              {formatDateTimePtBr(aceite.accepted_at)}
+                            </td>
+                            <td className="py-2 px-4 font-mono text-[11px] text-emerald-200 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-emerald-300" />
+                                {aceite.latitude.toFixed(6)},{" "}
+                                {aceite.longitude.toFixed(6)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCopiedCoords(false);
+                                    setViewingAceiteMap(aceite);
+                                  }}
+                                  className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/30 bg-cyan-400/10 text-[11px] font-medium text-cyan-200 hover:bg-cyan-400/20 hover:text-white transition-colors cursor-pointer"
+                                >
+                                  <MapIcon className="h-3.5 w-3.5" />
+                                  <span>Ver no Mapa</span>
+                                </button>
+                                <a
+                                  href={routeUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-400/10 text-[11px] font-medium text-emerald-200 hover:bg-emerald-400/20 hover:text-white transition-colors"
+                                >
+                                  <Navigation className="h-3.5 w-3.5" />
+                                  <span>Montar Rota</span>
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* ===================================================================
+            TAB 6: PARÂMETROS DE RATE LIMIT, BLOQUEADOS & AUDITORIA (ADMIN)
+           =================================================================== */}
+        {activeTab === "parametros" && isAdmin && (
+          <RateLimitAdminPanel
+            config={rateLimitConfig}
+            states={rateLimitStates}
+            audits={rateLimitAudits}
+            usuarios={usuarios}
+            isPending={isPending}
+            onRunAction={runAction}
+          />
         )}
       </main>
 
@@ -1856,37 +2357,42 @@ export function GestaoAulasApp({
       </Dialog>
 
       {/* =====================================================================
-          DIALOG 4: CADASTRAR OU EDITAR PROFESSOR
+          DIALOG 4: CADASTRAR OU EDITAR USUÁRIO (SELEÇÃO ÚNICA DE PERFIL)
          ===================================================================== */}
       <Dialog
-        open={openModal === "professores"}
+        open={openModal === "usuarios"}
         onClose={handleCloseModal}
-        eyebrow="Corpo Docente"
-        title={
-          editingProfessor ? "Editar Professor(a)" : "Cadastrar Professor(a)"
+        eyebrow="Controle de Acesso"
+        title={editingUsuario ? "Editar Usuário" : "Cadastrar Novo Usuário"}
+        description={
+          editingUsuario
+            ? "Atualize os dados, o perfil de acesso ou redefina a senha deste usuário."
+            : "Selecione o perfil de acesso (apenas uma opção) e defina a senha inicial. No 1º login o usuário aceitará os Termos de Uso e definirá uma nova senha."
         }
       >
         <form
-          key={editingProfessor ? editingProfessor.id : "new-prof"}
+          key={editingUsuario ? editingUsuario.id : "new-usuario"}
           onSubmit={(e) => {
             e.preventDefault();
             const form = e.currentTarget;
             const fd = new FormData(form);
-            if (editingProfessor) {
+            fd.delete("roles");
+            fd.append("roles", draftUsuarioRole);
+            if (editingUsuario) {
               runAction(
-                () => updateProfessorAction(editingProfessor.id, fd),
+                () => updateUsuarioAction(editingUsuario.id, fd),
                 () => handleCloseModal(),
                 "Atualização concluída"
               );
             } else {
               runAction(
-                () => createProfessorAction(fd),
+                () => createUsuarioAction(fd),
                 () => {
                   form.reset();
                   setDraftTelefone("");
                   handleCloseModal();
                 },
-                "Cadastro realizado"
+                "Usuário cadastrado"
               );
             }
           }}
@@ -1897,7 +2403,7 @@ export function GestaoAulasApp({
             <input
               name="nome"
               required
-              defaultValue={editingProfessor?.nome ?? ""}
+              defaultValue={editingUsuario?.nome ?? ""}
               placeholder="Ex: Prof. Dr. Marcos Vinicius"
               className={GLASS_INPUT_CLASS}
             />
@@ -1909,35 +2415,169 @@ export function GestaoAulasApp({
               name="email"
               type="email"
               required
-              defaultValue={editingProfessor?.email ?? ""}
-              placeholder="marcos.vinicius@unopar.br"
+              defaultValue={editingUsuario?.email ?? ""}
+              placeholder="usuario@unopar.br"
               className={GLASS_INPUT_CLASS}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={GLASS_LABEL_CLASS}>Titulação *</label>
-              <Select
-                name="titulacao"
-                value={draftTitulacao}
-                onChange={setDraftTitulacao}
-                options={TITULACAO_OPTIONS}
-                searchable={false}
-              />
+          {/* Perfil de Acesso (Seleção Única Exclusiva) */}
+          <fieldset>
+            <legend className={GLASS_LABEL_CLASS}>Perfil de Acesso *</legend>
+            <div className="space-y-2">
+              {ALL_USER_ROLES.map((roleOption) => {
+                const checked = draftUsuarioRole === roleOption;
+                return (
+                  <label
+                    key={roleOption}
+                    className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer select-none transition-all ${
+                      checked
+                        ? "border-cyan-400/50 bg-cyan-400/[0.08]"
+                        : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="roles"
+                      value={roleOption}
+                      checked={checked}
+                      onChange={() => setDraftUsuarioRole(roleOption)}
+                      className="sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={`mt-0.5 h-4 w-4 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
+                        checked
+                          ? "bg-cyan-400 border-cyan-300 text-slate-950"
+                          : "border-white/25 bg-white/[0.05] text-transparent"
+                      }`}
+                    >
+                      <Check className="h-2.5 w-2.5 stroke-[3.5]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-white">
+                          {ROLE_LABELS[roleOption]}
+                        </span>
+                        <span
+                          className={`font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border ${ROLE_BADGE_STYLES[roleOption]}`}
+                        >
+                          {roleOption}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                        {ROLE_CHECKBOX_DESCRIPTIONS[roleOption]}
+                      </p>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
+          </fieldset>
+
+          {/* Campos condicionais quando o perfil PROFESSOR está selecionado */}
+          {draftUsuarioRole === "PROFESSOR" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-indigo-400/25 bg-indigo-500/[0.06] p-3">
+              <div>
+                <label className={GLASS_LABEL_CLASS}>Titulação *</label>
+                <Select
+                  name="titulacao"
+                  value={draftTitulacao}
+                  onChange={setDraftTitulacao}
+                  options={TITULACAO_OPTIONS}
+                  searchable={false}
+                />
+              </div>
+              <div>
+                <label className={GLASS_LABEL_CLASS}>Telefone</label>
+                <input
+                  name="telefone"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={15}
+                  value={draftTelefone}
+                  onChange={(e) =>
+                    setDraftTelefone(formatPhoneBr(e.target.value))
+                  }
+                  placeholder="(43) 99999-0000"
+                  className={GLASS_INPUT_CLASS}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Senha e Confirmar Senha */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className={GLASS_LABEL_CLASS}>Telefone</label>
-              <input
-                name="telefone"
-                type="tel"
-                inputMode="numeric"
-                maxLength={15}
-                value={draftTelefone}
-                onChange={(e) => setDraftTelefone(formatPhoneBr(e.target.value))}
-                placeholder="(43) 99999-0000"
-                className={GLASS_INPUT_CLASS}
-              />
+              <label className={GLASS_LABEL_CLASS}>
+                {editingUsuario ? "Nova Senha (opcional)" : "Senha *"}
+              </label>
+              <div className="relative">
+                <Lock className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  name="password"
+                  type={showUserPassword ? "text" : "password"}
+                  required={!editingUsuario}
+                  minLength={editingUsuario ? undefined : 6}
+                  autoComplete="new-password"
+                  placeholder={
+                    editingUsuario
+                      ? "Manter senha atual"
+                      : "Mínimo 6 caracteres"
+                  }
+                  className={`${GLASS_INPUT_CLASS} pl-9 pr-9`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUserPassword((prev) => !prev)}
+                  aria-label={
+                    showUserPassword ? "Ocultar senha" : "Mostrar senha"
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-cyan-300 cursor-pointer"
+                >
+                  {showUserPassword ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className={GLASS_LABEL_CLASS}>
+                {editingUsuario
+                  ? "Confirmar Nova Senha"
+                  : "Confirmar Senha *"}
+              </label>
+              <div className="relative">
+                <KeyRound className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  name="confirmPassword"
+                  type={showUserConfirmPassword ? "text" : "password"}
+                  required={!editingUsuario}
+                  minLength={editingUsuario ? undefined : 6}
+                  autoComplete="new-password"
+                  placeholder="Repita a senha"
+                  className={`${GLASS_INPUT_CLASS} pl-9 pr-9`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUserConfirmPassword((prev) => !prev)}
+                  aria-label={
+                    showUserConfirmPassword
+                      ? "Ocultar confirmação"
+                      : "Mostrar confirmação"
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-cyan-300 cursor-pointer"
+                >
+                  {showUserConfirmPassword ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1956,14 +2596,269 @@ export function GestaoAulasApp({
             >
               <Users className="h-4 w-4" />
               <span>
-                {editingProfessor
-                  ? "Salvar Alterações"
-                  : "Salvar Professor(a)"}
+                {editingUsuario ? "Salvar Alterações" : "Cadastrar Usuário"}
               </span>
             </button>
           </div>
         </form>
       </Dialog>
+
+      {/* =====================================================================
+          DIALOG 5: CADASTRAR OU EDITAR TERMO DE USO
+         ===================================================================== */}
+      <Dialog
+        open={openModal === "termos"}
+        onClose={handleCloseModal}
+        maxWidthClass="max-w-2xl"
+        eyebrow="Conformidade & LGPD"
+        title={
+          editingTermo ? "Editar Termo de Uso" : "Cadastrar Novo Termo de Uso"
+        }
+        description="Defina o texto que será apresentado obrigatoriamente aos usuários no primeiro acesso com captura de geolocalização."
+      >
+        <form
+          key={editingTermo ? editingTermo.id : "new-termo"}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const fd = new FormData(form);
+            fd.set("ativo", draftTermoAtivo ? "true" : "false");
+            if (editingTermo) {
+              runAction(
+                () => updateTermoUsoAction(editingTermo.id, fd),
+                () => handleCloseModal(),
+                "Termo atualizado"
+              );
+            } else {
+              runAction(
+                () => createTermoUsoAction(fd),
+                () => {
+                  form.reset();
+                  handleCloseModal();
+                },
+                "Termo cadastrado"
+              );
+            }
+          }}
+          className="space-y-4"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className={GLASS_LABEL_CLASS}>Título do Termo *</label>
+              <input
+                name="titulo"
+                required
+                defaultValue={editingTermo?.titulo ?? ""}
+                placeholder="Ex: Termos de Uso e Política de Privacidade"
+                className={GLASS_INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label className={GLASS_LABEL_CLASS}>Versão *</label>
+              <input
+                name="versao"
+                required
+                defaultValue={editingTermo?.versao ?? "1.1"}
+                placeholder="Ex: 1.1"
+                className={`${GLASS_INPUT_CLASS} font-mono`}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={GLASS_LABEL_CLASS}>
+              Conteúdo Completo do Termo *
+            </label>
+            <textarea
+              name="conteudo"
+              required
+              rows={8}
+              defaultValue={editingTermo?.conteudo ?? ""}
+              placeholder="Descreva integralmente as cláusulas e condições de uso do sistema..."
+              className={`${GLASS_TEXTAREA_CLASS} leading-relaxed`}
+            />
+          </div>
+
+          <label className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-xs text-slate-200 cursor-pointer select-none hover:border-white/20 transition-colors">
+            <input
+              type="checkbox"
+              checked={draftTermoAtivo}
+              onChange={(e) => setDraftTermoAtivo(e.target.checked)}
+              className="h-4 w-4 rounded border-white/25 bg-white/[0.06] accent-cyan-400 cursor-pointer"
+            />
+            <span>
+              Definir como <strong className="text-white">Termo Vigente</strong>{" "}
+              (desativa a versão anterior automaticamente)
+            </span>
+          </label>
+
+          <div className="pt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleCloseModal}
+              className={GLASS_CANCEL_BTN_CLASS}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className={GLASS_PRIMARY_BTN_CLASS}
+            >
+              <FileText className="h-4 w-4" />
+              <span>
+                {editingTermo ? "Salvar Alterações" : "Salvar Termo de Uso"}
+              </span>
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* =====================================================================
+          DIALOG 6: VISUALIZAÇÃO NO MAPA & ROTA DO ACEITE DE TERMOS
+         ===================================================================== */}
+      <Dialog
+        open={Boolean(viewingAceiteMap)}
+        onClose={() => setViewingAceiteMap(null)}
+        maxWidthClass="max-w-2xl"
+        eyebrow="Auditoria de Geolocalização"
+        title="Localização do Aceite no Mapa"
+        description={
+          viewingAceiteMap
+            ? `${
+                userById.get(viewingAceiteMap.user_id)?.nome ?? "Usuário"
+              } · Termo v${
+                termoById.get(viewingAceiteMap.termo_id)?.versao ?? "—"
+              } · ${formatDateTimePtBr(viewingAceiteMap.accepted_at)}`
+            : undefined
+        }
+      >
+        {viewingAceiteMap && (
+          <div className="space-y-4">
+            {/* Cards de Latitude, Longitude e Precisão */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+                <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                  Latitude
+                </span>
+                <span className="font-mono text-xs font-semibold text-cyan-200 mt-0.5 block">
+                  {viewingAceiteMap.latitude.toFixed(6)}
+                </span>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+                <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                  Longitude
+                </span>
+                <span className="font-mono text-xs font-semibold text-emerald-200 mt-0.5 block">
+                  {viewingAceiteMap.longitude.toFixed(6)}
+                </span>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+                <span className="block font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                  Precisão GPS
+                </span>
+                <span className="font-mono text-xs font-semibold text-slate-200 mt-0.5 block">
+                  {viewingAceiteMap.accuracy
+                    ? `± ${Math.round(viewingAceiteMap.accuracy)} m`
+                    : "Padrão"}
+                </span>
+              </div>
+            </div>
+
+            {/* Mapa Interativo Embutido */}
+            <div className="relative overflow-hidden rounded-xl border border-white/15 bg-[#060b18]">
+              <iframe
+                title="Mapa da localização do aceite dos termos"
+                src={buildGoogleMapsEmbedUrl(
+                  viewingAceiteMap.latitude,
+                  viewingAceiteMap.longitude
+                )}
+                className="h-[340px] w-full border-0"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+
+            {/* Ações: Copiar, Abrir no Google Maps e Montar Rota */}
+            <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const coordsText = `${viewingAceiteMap.latitude.toFixed(
+                    6
+                  )}, ${viewingAceiteMap.longitude.toFixed(6)}`;
+                  try {
+                    await navigator.clipboard.writeText(coordsText);
+                    setCopiedCoords(true);
+                    window.setTimeout(() => setCopiedCoords(false), 2200);
+                  } catch {
+                    // fallback silencioso
+                  }
+                }}
+                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.05] text-xs font-medium text-slate-200 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer"
+              >
+                {copiedCoords ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-300" />
+                    <span className="text-emerald-200">Coordenadas copiadas</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5 text-slate-400" />
+                    <span>Copiar Lat/Lng</span>
+                  </>
+                )}
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={buildGoogleMapsPinUrl(
+                    viewingAceiteMap.latitude,
+                    viewingAceiteMap.longitude
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-cyan-400/35 bg-cyan-400/10 text-xs font-medium text-cyan-200 hover:bg-cyan-400/20 hover:text-white transition-colors"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>Abrir no Google Maps</span>
+                </a>
+
+                <a
+                  href={buildGoogleMapsDirectionsUrl(
+                    viewingAceiteMap.latitude,
+                    viewingAceiteMap.longitude
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={GLASS_PRIMARY_BTN_CLASS}
+                >
+                  <Navigation className="h-3.5 w-3.5" />
+                  <span>Montar Rota</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* =====================================================================
+          FLUXO OBRIGATÓRIO DE PRIMEIRO ACESSO (TERMO + LAT/LNG -> NOVA SENHA)
+         ===================================================================== */}
+      <FirstAccessOnboardingModal
+        activeTermo={onboarding.activeTermo}
+        initialNeedsAcceptTerms={onboarding.needsAcceptTerms}
+        initialNeedsChangePassword={onboarding.needsChangePassword}
+        userName={currentUser.nome}
+        onCompleted={(message) =>
+          setFeedback({
+            id: Date.now(),
+            type: "success",
+            title: "Primeiro acesso concluído",
+            text: message,
+          })
+        }
+      />
 
       {/* =====================================================================
           DIALOG 5: CONFIRMAÇÃO DE EXCLUSÃO

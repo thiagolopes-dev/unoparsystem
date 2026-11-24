@@ -7,6 +7,7 @@ import {
   ChevronRight,
   X,
 } from "lucide-react";
+import { FloatingPanel } from "@/components/ui/floating-panel";
 
 const MONTHS_PT = [
   "Janeiro",
@@ -61,6 +62,7 @@ interface DatePickerProps {
   allowClear?: boolean;
   highlightedDates?: string[];
   size?: "sm" | "md";
+  align?: "left" | "right";
   className?: string;
 }
 
@@ -72,10 +74,12 @@ export function DatePicker({
   allowClear = false,
   highlightedDates = [],
   size = "md",
+  align = "left",
   className = "",
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const todayIso = useMemo(() => {
     const now = new Date();
@@ -105,21 +109,25 @@ export function DatePicker({
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
       ) {
         setOpen(false);
       }
     }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [open]);
 
@@ -252,8 +260,14 @@ export function DatePicker({
         )}
       </div>
 
-      {open && (
-        <div className="absolute left-0 z-50 mt-1.5 w-[292px] rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-4 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none">
+      <FloatingPanel
+        open={open}
+        anchorRef={containerRef}
+        panelRef={panelRef}
+        align={align}
+        fixedWidth={292}
+        className="rounded-2xl border border-white/15 bg-[#0c1428]/95 backdrop-blur-2xl p-4 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.85)] ring-1 ring-white/5 select-none max-h-[calc(100dvh-16px)] overflow-y-auto"
+      >
           {/* Header: Month + Year & Nav */}
           <div className="flex items-center justify-between mb-3">
             <button
@@ -363,8 +377,7 @@ export function DatePicker({
               </button>
             )}
           </div>
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }

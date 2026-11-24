@@ -4,12 +4,22 @@ import {
   turmaSchema,
   professorSchema,
   aulaSchema,
+  createUsuarioSchema,
+  updateUsuarioSchema,
+  termoUsoSchema,
+  termoAceiteSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   detectScheduleConflict,
   canManageCatalog,
+  canViewAcademicCatalog,
   canUpdateAula,
   formatPhoneBr,
+  buildGoogleMapsPinUrl,
+  buildGoogleMapsDirectionsUrl,
+  buildGoogleMapsEmbedUrl,
+  rateLimitConfigSchema,
+  formatRemainingSecondsPtBr,
   type ExistingAulaSlot,
 } from "../gestao-aulas";
 
@@ -263,15 +273,24 @@ describe("TDD - Domínio de Gestão de Aulas", () => {
   });
 
   describe("3. Controle de Acesso Baseado em Papel (RBAC)", () => {
-    it("deve permitir gestão de cadastros base apenas para ADMIN", () => {
+    it("deve permitir gestão de cadastros base apenas para ADMIN (incluindo multi-perfil)", () => {
       expect(canManageCatalog("ADMIN")).toBe(true);
-      expect(canManageCatalog("PROFESSOR")).toBe(false);
+      expect(canManageCatalog(["ADMIN", "PROFESSOR"])).toBe(true);
+      expect(canManageCatalog(["PROFESSOR"])).toBe(false);
+      expect(canManageCatalog(["ALUNO"])).toBe(false);
     });
 
-    it("deve permitir atualização de aula para ADMIN ou para o PROFESSOR responsável pela aula", () => {
+    it("deve permitir visualização de Disciplinas e Turmas apenas para ADMIN e PROFESSOR (nunca só ALUNO)", () => {
+      expect(canViewAcademicCatalog(["ADMIN"])).toBe(true);
+      expect(canViewAcademicCatalog(["PROFESSOR"])).toBe(true);
+      expect(canViewAcademicCatalog(["PROFESSOR", "ALUNO"])).toBe(true);
+      expect(canViewAcademicCatalog(["ALUNO"])).toBe(false);
+    });
+
+    it("deve permitir atualização/edição de aula exclusivamente para ADMIN (Professor e Aluno são somente leitura)", () => {
       expect(
         canUpdateAula({
-          userRole: "ADMIN",
+          userRoles: ["ADMIN"],
           userId: "admin-1",
           aulaProfessorUserId: "prof-user-1",
         })
@@ -279,19 +298,201 @@ describe("TDD - Domínio de Gestão de Aulas", () => {
 
       expect(
         canUpdateAula({
-          userRole: "PROFESSOR",
+          userRoles: ["PROFESSOR"],
           userId: "prof-user-1",
           aulaProfessorUserId: "prof-user-1",
         })
-      ).toBe(true);
+      ).toBe(false);
 
       expect(
         canUpdateAula({
-          userRole: "PROFESSOR",
-          userId: "prof-user-2",
+          userRoles: ["ALUNO"],
+          userId: "aluno-user-1",
           aulaProfessorUserId: "prof-user-1",
         })
       ).toBe(false);
+    });
+  });
+
+  describe("5. Cadastro Unificado de Usuários (Checkboxes) e Termos de Uso", () => {
+    it("deve exigir titulação quando o perfil PROFESSOR estiver marcado e permitir apenas um perfil por usuário", () => {
+      const semTitulacao = createUsuarioSchema.safeParse({
+        nome: "Prof. João Silva",
+        email: "joao@unopar.br",
+        roles: ["PROFESSOR"],
+        titulacao: "",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+      });
+      expect(semTitulacao.success).toBe(false);
+
+      const multiplosPerfis = createUsuarioSchema.safeParse({
+        nome: "Prof. João Silva",
+        email: "joao@unopar.br",
+        roles: ["ADMIN", "PROFESSOR"],
+        titulacao: "Mestre",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+      });
+      expect(multiplosPerfis.success).toBe(false);
+
+      const comTitulacao = createUsuarioSchema.safeParse({
+        nome: "Prof. João Silva",
+        email: "JOAO@unopar.br",
+        roles: ["PROFESSOR"],
+        titulacao: "Mestre",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+      });
+      expect(comTitulacao.success).toBe(true);
+      if (comTitulacao.success) {
+        expect(comTitulacao.data.email).toBe("joao@unopar.br");
+        expect(comTitulacao.data.roles).toEqual(["PROFESSOR"]);
+        expect(comTitulacao.data.titulacao).toBe("Mestre");
+      }
+    });
+
+    it("deve permitir cadastrar ALUNO sem titulação e zerar titulação se não for PROFESSOR", () => {
+      const aluno = createUsuarioSchema.safeParse({
+        nome: "Maria Oliveira",
+        email: "maria@unopar.br",
+        roles: ["ALUNO"],
+        titulacao: "Mestre",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+      });
+      expect(aluno.success).toBe(true);
+      if (aluno.success) {
+        expect(aluno.data.titulacao).toBeNull();
+      }
+    });
+
+    it("deve rejeitar cadastro de usuário sem perfil marcado ou com senhas divergentes", () => {
+      expect(
+        createUsuarioSchema.safeParse({
+          nome: "Sem Perfil",
+          email: "sem@unopar.br",
+          roles: [],
+          password: "Password123!",
+          confirmPassword: "Password123!",
+        }).success
+      ).toBe(false);
+
+      expect(
+        createUsuarioSchema.safeParse({
+          nome: "Senha Diferente",
+          email: "dif@unopar.br",
+          roles: ["ALUNO"],
+          password: "Password123!",
+          confirmPassword: "OutraSenha123!",
+        }).success
+      ).toBe(false);
+    });
+
+    it("deve permitir editar usuário mantendo a senha atual em branco", () => {
+      const edit = updateUsuarioSchema.safeParse({
+        nome: "Maria Oliveira Atualizada",
+        email: "maria@unopar.br",
+        roles: ["ALUNO"],
+        password: "",
+        confirmPassword: "",
+      });
+      expect(edit.success).toBe(true);
+      if (edit.success) {
+        expect(edit.data.password).toBeUndefined();
+      }
+    });
+
+    it("deve validar cadastro de Termo de Uso e registro de aceite com latitude/longitude", () => {
+      expect(
+        termoUsoSchema.safeParse({
+          titulo: "Termos de Uso UnoparSystem",
+          versao: "2.0",
+          conteudo: "Texto completo dos termos de uso do sistema acadêmico.",
+          ativo: true,
+        }).success
+      ).toBe(true);
+
+      expect(
+        termoAceiteSchema.safeParse({
+          termo_id: "77b80c23-0c3d-4d28-9416-14f3b679eeb4",
+          latitude: -23.304452,
+          longitude: -51.169582,
+          accuracy: 15,
+        }).success
+      ).toBe(true);
+
+      expect(
+        termoAceiteSchema.safeParse({
+          termo_id: "77b80c23-0c3d-4d28-9416-14f3b679eeb4",
+          latitude: 120,
+          longitude: -51.169582,
+        }).success
+      ).toBe(false);
+    });
+
+    it("deve gerar URLs corretas do Google Maps para pin, embed e rota", () => {
+      expect(buildGoogleMapsPinUrl(-23.304452, -51.169582)).toBe(
+        "https://www.google.com/maps/search/?api=1&query=-23.304452,-51.169582"
+      );
+      expect(buildGoogleMapsDirectionsUrl(-23.304452, -51.169582)).toBe(
+        "https://www.google.com/maps/dir/?api=1&destination=-23.304452,-51.169582"
+      );
+      expect(buildGoogleMapsEmbedUrl(-23.304452, -51.169582)).toBe(
+        "https://maps.google.com/maps?q=-23.304452,-51.169582&z=16&output=embed"
+      );
+    });
+  });
+
+  describe("6. Parâmetros de Rate Limit e Formatação de Tempo", () => {
+    it("deve validar configuração padrão de 50 requests, janela e tempo de bloqueio", () => {
+      const valid = rateLimitConfigSchema.safeParse({
+        enabled: true,
+        bypass_admin: true,
+        max_requests: 50,
+        window_seconds: 60,
+        block_duration_minutes: 15,
+      });
+      expect(valid.success).toBe(true);
+    });
+
+    it("deve rejeitar limites ou tempos de bloqueio inválidos", () => {
+      expect(
+        rateLimitConfigSchema.safeParse({
+          enabled: true,
+          bypass_admin: true,
+          max_requests: 0,
+          window_seconds: 60,
+          block_duration_minutes: 15,
+        }).success
+      ).toBe(false);
+
+      expect(
+        rateLimitConfigSchema.safeParse({
+          enabled: true,
+          bypass_admin: true,
+          max_requests: 50,
+          window_seconds: 5,
+          block_duration_minutes: 15,
+        }).success
+      ).toBe(false);
+
+      expect(
+        rateLimitConfigSchema.safeParse({
+          enabled: true,
+          bypass_admin: true,
+          max_requests: 50,
+          window_seconds: 60,
+          block_duration_minutes: 0,
+        }).success
+      ).toBe(false);
+    });
+
+    it("deve formatar corretamente o tempo restante de bloqueio em português", () => {
+      expect(formatRemainingSecondsPtBr(45)).toBe("45s");
+      expect(formatRemainingSecondsPtBr(125)).toBe("2min 5s");
+      expect(formatRemainingSecondsPtBr(900)).toBe("15min");
+      expect(formatRemainingSecondsPtBr(3660)).toBe("1h 1min");
     });
   });
 

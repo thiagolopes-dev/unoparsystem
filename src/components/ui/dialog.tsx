@@ -5,7 +5,9 @@ import { X } from "lucide-react";
 
 interface DialogProps {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  dismissible?: boolean;
+  maxWidthClass?: string;
   eyebrow?: string;
   title: string;
   description?: string;
@@ -15,19 +17,21 @@ interface DialogProps {
 export function Dialog({
   open,
   onClose,
+  dismissible = true,
+  maxWidthClass = "max-w-lg",
   eyebrow,
   title,
   description,
   children,
 }: DialogProps) {
   useEffect(() => {
-    if (!open) return;
+    if (!open || !dismissible || !onClose) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onClose?.();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open, dismissible, onClose]);
 
   if (!open) return null;
 
@@ -40,12 +44,14 @@ export function Dialog({
     >
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        onClick={dismissible ? onClose : undefined}
         className="fixed inset-0 bg-[#02040a]/75 backdrop-blur-md transition-opacity"
       />
 
       {/* Dialog Panel */}
-      <div className="relative z-10 w-full max-w-lg rounded-2xl border border-white/15 bg-[#0b1224]/90 backdrop-blur-2xl p-6 text-slate-100 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.85),0_0_45px_-16px_rgba(34,211,238,0.2)] ring-1 ring-white/5 my-auto">
+      <div
+        className={`relative z-10 w-full ${maxWidthClass} rounded-2xl border border-white/15 bg-[#0b1224]/90 backdrop-blur-2xl p-6 text-slate-100 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.85),0_0_45px_-16px_rgba(34,211,238,0.2)] ring-1 ring-white/5 my-auto`}
+      >
         {/* Top specular cyan glass edge */}
         <div
           aria-hidden="true"
@@ -70,14 +76,16 @@ export function Dialog({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Fechar janela"
-            className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-transparent text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white focus-visible:border-cyan-400/50 focus-visible:text-white transition-colors cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {dismissible && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar janela"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-transparent text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white focus-visible:border-cyan-400/50 focus-visible:text-white transition-colors cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {children}
